@@ -1,0 +1,742 @@
+openapi: 3.0.0
+info:
+  title: API WhatsApp
+  version: 1.0.0
+  description: Documentation de l'API WhatsApp
+
+servers:
+  - url: http://localhost:5000/api/auth
+    description: Serveur local
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Entrez votre token JWT après login. Exemple: Bearer eyJhbGci..."
+
+  schemas:
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        Company_name:
+          type: string
+          example: "DevCode Groupe"
+        email:
+          type: string
+          example: "contact@devcode.cm"
+        country:
+          type: string
+          example: "Cameroun"
+        role:
+          type: string
+          enum: [Superadmin, admin]
+          example: "admin"
+        is_active:
+          type: boolean
+          example: true
+        is_verify:
+          type: boolean
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-24T10:00:00.000Z"
+
+    Contact:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Jean Dupont"
+        Phone:
+          type: string
+          example: "+237612345678"
+        is_valid:
+          type: boolean
+          example: false
+        contactListId:
+          type: integer
+          example: 1
+        userId:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-24T10:00:00.000Z"
+
+    ContactList:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Clients Janvier 2026"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-24T10:00:00.000Z"
+
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Une erreur est survenue"
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentification et gestion des utilisateurs
+  - name: Contacts
+    description: Gestion des contacts
+  - name: Contact List
+    description: Gestion des listes de contacts
+  - name: Messages
+    description: Envoi de messages WhatsApp
+
+paths:
+
+  # ═══════════════════════════════════════
+  #              AUTH
+  # ═══════════════════════════════════════
+
+  /login:
+    post:
+      summary: Connecter un utilisateur
+      description: |
+        Retourne un **token JWT** à utiliser dans le bouton **Authorize 🔒** en haut de la page.
+        **URL complète :** `POST http://localhost:5000/api/auth/login`
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  example: "test@gmail.com"
+                password:
+                  type: string
+                  example: "123456"
+            examples:
+              Standard:
+                value:
+                  email: "test@gmail.com"
+                  password: "123456"
+      responses:
+        "200":
+          description: Connexion réussie
+          content:
+            application/json:
+              example:
+                message: "Connexion réussie"
+                accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                user:
+                  id: 1
+                  email: "test@gmail.com"
+                  company: "Mon Entreprise"
+                  role: "admin"
+        "401":
+          description: Email ou mot de passe incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: "Email ou mot de passe incorrect"
+
+  /verify-email:
+    post:
+      summary: Vérifier l'email après inscription
+      description: |
+        **URL complète :** `POST http://localhost:5000/api/auth/verify-email`
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  example: "test@gmail.com"
+                code:
+                  type: string
+                  example: "123456"
+      responses:
+        "200":
+          description: Email vérifié avec succès
+          content:
+            application/json:
+              example:
+                message: "Compte vérifié avec succès !"
+        "400":
+          description: Code invalide
+        "404":
+          description: Utilisateur non trouvé
+
+  # pour le refresh token, route publique car le token d'accès a expiré
+  /auth/refresh:
+    post:
+      summary: Rafraîchir le token JWT
+      description: |
+        **URL complète :** `POST http://localhost:5000/api/auth/refresh`
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        "200":
+          description: Nouveau token généré
+          content:
+            application/json:
+              example:
+                message: "Token renouvelé avec succès"
+                accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        "403":
+          description: Refresh token invalide ou expiré
+
+  /logout:
+    post:
+      summary: Déconnecter un utilisateur
+      description: |
+        **URL complète :** `POST http://localhost:5000/api/auth/logout`
+      tags: [Auth]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        "200":
+          description: Déconnexion réussie
+          content:
+            application/json:
+              example:
+                message: "Déconnexion réussie."
+        "400":
+          description: Refresh token manquant
+        "403":
+          description: Token invalide
+
+  /register:
+    post:
+      summary: Créer un nouveau compte utilisateur
+      description: |
+        Un **code de vérification** est envoyé par email après l'inscription.
+        **URL complète :** `POST http://localhost:5000/api/auth/register`
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [Company_name, email, password, country]
+              properties:
+                Company_name:
+                  type: string
+                  example: "Mon Entreprise"
+                email:
+                  type: string
+                  example: "test@gmail.com"
+                password:
+                  type: string
+                  example: "123456"
+                country:
+                  type: string
+                  example: "Cameroun"
+            examples:
+              Cameroun:
+                value:
+                  Company_name: "DevCode Groupe"
+                  email: "contact@devcode.cm"
+                  password: "motdepasse123"
+                  country: "Cameroun"
+      responses:
+        "201":
+          description: Utilisateur créé avec succès
+          content:
+            application/json:
+              example:
+                status: "success"
+                message: "Inscription réussie ! Veuillez consulter votre boîte mail."
+                user:
+                  id: 1
+                  Company_name: "DevCode Groupe"
+                  email: "contact@devcode.cm"
+                  country: "Cameroun"
+                  role: "admin"
+                  is_active: true
+                  is_verify: false
+                  created_at: "2026-03-24T10:00:00.000Z"
+        "400":
+          description: Champs manquants
+        "409":
+          description: Email déjà utilisé
+
+  /user/{id}:
+    get:
+      summary: Récupérer un utilisateur par ID
+      description: |
+        **URL complète :** `GET http://localhost:5000/api/auth/user/{id}`
+      tags: [Auth]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        "200":
+          description: Utilisateur trouvé
+          content:
+            application/json:
+              example:
+                user:
+                  id: 1
+                  Company_name: "DevCode Groupe"
+                  email: "contact@devcode.cm"
+                  country: "Cameroun"
+                  role: "admin"
+                  is_active: true
+                  created_at: "2026-03-24T10:00:00.000Z"
+        "400":
+          description: ID invalide
+        "404":
+          description: Utilisateur non trouvé
+        "401":
+          description: Non autorisé
+
+  # ═══════════════════════════════════════
+  #           CONTACT LIST
+  # ═══════════════════════════════════════
+
+  /contact-list:
+    post:
+      summary: Créer une liste de contacts
+      description: |
+        ⚠️ Le nom de la liste doit être **unique par utilisateur**.
+        Conservez l'**id** retourné pour importer des contacts ensuite.
+        **URL complète :** `POST http://localhost:5000/api/auth/contact-list`
+      tags: [Contact List]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: "Clients Janvier 2026"
+            examples:
+              Clients:
+                value:
+                  name: "Clients Janvier 2026"
+              Prospects:
+                value:
+                  name: "Prospects Cameroun"
+      responses:
+        "201":
+          description: Liste créée avec succès
+          content:
+            application/json:
+              example:
+                message: "Liste créée avec succès"
+                contactList:
+                  id: 1
+                  name: "Clients Janvier 2026"
+                  created_at: "2026-03-24T10:00:00.000Z"
+        "400":
+          description: Nom manquant
+        "401":
+          description: Token manquant ou invalide
+
+  # ═══════════════════════════════════════
+  #              CONTACTS
+  # ═══════════════════════════════════════
+
+  /contact:
+    post:
+      summary: Créer un contact manuellement
+      description: |
+        Format recommandé : **+237XXXXXXXXX**
+        **URL complète :** `POST http://localhost:5000/api/auth/contact`
+      tags: [Contacts]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, Phone, contactListId, userId]
+              properties:
+                name:
+                  type: string
+                  example: "Jean Dupont"
+                Phone:
+                  type: string
+                  example: "+237612345678"
+                contactListId:
+                  type: integer
+                  example: 1
+                userId:
+                  type: integer
+                  example: 1
+      responses:
+        "201":
+          description: Contact créé avec succès
+          content:
+            application/json:
+              example:
+                message: "Contact créé avec succès"
+                contact:
+                  id: 1
+                  name: "Jean Dupont"
+                  Phone: "+237612345678"
+                  is_valid: false
+                  created_at: "2026-03-24T10:00:00.000Z"
+        "400":
+          description: Champs manquants
+        "401":
+          description: Token manquant ou invalide
+
+  /contact/{id}:
+    put:
+      summary: Modifier un contact
+      description: |
+        **URL complète :** `PUT http://localhost:5000/api/auth/contact/{id}`
+      tags: [Contacts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: "Jean Dupont modifié"
+                Phone:
+                  type: string
+                  example: "+237699999999"
+                is_valid:
+                  type: boolean
+                  example: true
+                contactListId:
+                  type: integer
+                  example: 1
+      responses:
+        "200":
+          description: Contact modifié avec succès
+          content:
+            application/json:
+              example:
+                message: "Contact mis à jour."
+                contact:
+                  id: 1
+                  name: "Jean Dupont modifié"
+                  Phone: "+237612345678"
+                  is_valid: true
+        "404":
+          description: Contact non trouvé
+        "401":
+          description: Token manquant ou invalide
+
+  /filter:
+    get:
+      summary: Filtrer les contacts
+      description: |
+        Le userId est récupéré automatiquement via le token JWT.
+        **URL complète :** `GET http://localhost:5000/api/auth/filter?is_valid=true`
+      tags: [Contacts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: is_valid
+          schema:
+            type: boolean
+          example: true
+        - in: query
+          name: date_from
+          schema:
+            type: string
+            format: date
+          example: "2026-01-01"
+        - in: query
+          name: date_to
+          schema:
+            type: string
+            format: date
+          example: "2026-03-31"
+      responses:
+        "200":
+          description: Liste des contacts filtrés
+          content:
+            application/json:
+              example:
+                - id: 1
+                  name: "Jean Dupont"
+                  Phone: "+237612345678"
+                  is_valid: true
+                  created_at: "2026-03-24T10:00:00.000Z"
+                  contactList:
+                    id: 1
+                    name: "Clients Janvier 2026"
+        "401":
+          description: Token invalide ou manquant
+        "404":
+          description: Aucun contact trouvé
+
+  /importcsv:
+    post:
+      summary: Importer des contacts en masse via CSV
+      description: |
+        **Format CSV attendu :**
+        ```
+        name,phone
+        Jean Dupont,+237612345678
+        ```
+        Les numéros déjà existants sont **ignorés automatiquement**.
+        **URL complète :** `POST http://localhost:5000/api/auth/importcsv`
+      tags: [Contacts]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, contactListId, userId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                contactListId:
+                  type: integer
+                  example: 1
+                userId:
+                  type: integer
+                  example: 1
+      responses:
+        "200":
+          description: Import réussi
+          content:
+            application/json:
+              example:
+                message: "3 contacts importés avec succès"
+                liste: "Clients Janvier 2026"
+        "400":
+          description: Fichier ou paramètres manquants
+        "401":
+          description: Token manquant ou invalide
+        "404":
+          description: Liste ou utilisateur non trouvé
+
+  /exportcsv/{contactListId}:
+    get:
+      summary: Exporter les contacts d'une liste en CSV
+      description: |
+        **URL complète :** `GET http://localhost:5000/api/auth/exportcsv/{contactListId}`
+      tags: [Contacts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: contactListId
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        "200":
+          description: Fichier CSV téléchargé
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Token manquant ou invalide
+        "404":
+          description: Aucun contact trouvé
+
+  # ═══════════════════════════════════════
+  #         MESSAGES WHATSAPP
+  # ═══════════════════════════════════════
+
+  /messages/send-text:
+    post:
+      summary: Envoyer un message texte WhatsApp
+      description: |
+        Envoie un message texte simple via WaAPI.
+        **URL complète :** `POST http://localhost:5000/api/auth/messages/send-text`
+        
+        ⚠️ Le numéro doit être au format international sans `+` : `237612345678`
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, message]
+              properties:
+                phone:
+                  type: string
+                  example: "237612345678"
+                  description: "Numéro sans + ni espaces (ex: 237612345678)"
+                message:
+                  type: string
+                  example: "Bonjour, ceci est un message test !"
+            examples:
+              SMS simple:
+                value:
+                  phone: "237612345678"
+                  message: "Bonjour depuis l'API WhatsApp !"
+      responses:
+        "200":
+          description: Message envoyé avec succès
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  id: "msg_123"
+                  status: "sent"
+        "400":
+          description: Champs manquants
+          content:
+            application/json:
+              example:
+                success: false
+                message: "Les champs 'phone' et 'message' sont requis."
+        "401":
+          description: Token manquant ou invalide
+
+  /messages/send-media:
+    post:
+      summary: Envoyer un message média WhatsApp
+      description: |
+        Envoie une image, vidéo, audio ou document via WaAPI.
+        **URL complète :** `POST http://localhost:5000/api/auth/messages/send-media`
+        
+        ⚠️ `mediaUrl` doit être une URL **publique et accessible**.
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, mediaUrl, type]
+              properties:
+                phone:
+                  type: string
+                  example: "237612345678"
+                mediaUrl:
+                  type: string
+                  example: "https://example.com/image.jpg"
+                caption:
+                  type: string
+                  example: "Voici notre catalogue"
+                type:
+                  type: string
+                  enum: [image, video, audio, document]
+                  example: "image"
+            examples:
+              Image:
+                value:
+                  phone: "237612345678"
+                  mediaUrl: "https://example.com/image.jpg"
+                  caption: "Notre catalogue"
+                  type: "image"
+              Document PDF:
+                value:
+                  phone: "237612345678"
+                  mediaUrl: "https://example.com/document.pdf"
+                  caption: "Contrat"
+                  type: "document"
+      responses:
+        "200":
+          description: Média envoyé avec succès
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  id: "msg_456"
+                  status: "sent"
+        "400":
+          description: Champs manquants ou type invalide
+          content:
+            application/json:
+              example:
+                success: false
+                message: "Les champs 'phone', 'mediaUrl' et 'type' sont requis."
+        "401":
+          description: Token manquant ou invalide

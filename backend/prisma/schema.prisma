@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN_RH
+  TUTEUR
+  STAGIAIRE
+}
+
+enum InscriptionStatus {
+  RECUE
+  EN_EXAMEN
+  ACCEPTEE
+  REFUSEE
+}
+
+enum TacheStatut {
+  A_FAIRE
+  EN_COURS
+  EN_REVISION
+  TERMINEE
+}
+
+enum PriorityLevel {
+  BASSE
+  MOYENNE
+  HAUTE
+  URGENTE
+}
+
+enum PresenceStatut {
+  PRESENT
+  RETARD
+  ABSENT
+  TELETRAVAIL
+}
+
+enum PaiementStatut {
+  PLANIFIE
+  PARTIEL   // 🆕 Ajouté pour correspondre au Badge 'PAYÉ PARTIEL'
+  PAYE
+  LITIGE
+}
+
+enum PaymentMethod {
+  MOMO
+  ORANGE
+  CARD
+  CASH
+}
+
+enum TrancheStatut {
+  EN_ATTENTE
+  REUSSIT
+  ECHOUE
+}
+
+model User {
+  id               String       @id @default(uuid())
+  email            String       @unique
+  password         String
+  nom              String
+  prenom           String
+  telephone        String?
+  photoUrl         String?
+  role             Role         @default(STAGIAIRE)
+  actif            Boolean      @default(true)
+  is_verify        Boolean      @default(false)
+  company          String?      
+  refreshToken     String?      @db.Text
+  verificationCode String?      
+  codeExpiresAt    DateTime?    
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  stagiaire        Stagiaire?
+  tachesCreees     Tache[]      @relation("TacheCreator")
+  rapportsValides  Rapport[]    @relation("RapportValidator")
+  evaluations      Evaluation[] @relation("Evaluator")
+  auditLogs        AuditLog[]
+}
+
+model Stagiaire {
+  id            String       @id @default(uuid())
+  userId        String       @unique
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  numeroDossier String       @unique
+  domaine       String
+  dateDebut     DateTime
+  dateFin       DateTime
+  tuteurId      String?
+  cvUrl         String?
+  motivationUrl String?
+  photoUrl      String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  taches        Tache[]
+  rapports      Rapport[]
+  presences     Presence[]
+  paiements     Paiement[]
+  evaluation    Evaluation?
+}
+
+model Inscription {
+  id            String            @id @default(uuid())
+  numeroDossier String            @unique
+  nom           String
+  prenom        String
+  email         String
+  telephone     String?
+  domaine       String
+  periode       String
+  cvUrl         String?
+  motivationUrl String?
+  status        InscriptionStatus @default(RECUE)
+  commentaire   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model Tache {
+  id          String        @id @default(uuid())
+  titre       String
+  description String?
+  statut      TacheStatut   @default(A_FAIRE)
+  priorite    PriorityLevel @default(MOYENNE)
+  deadline    DateTime?
+  stagiaireId String
+  stagiaire   Stagiaire     @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  createurId  String
+  createur    User          @relation("TacheCreator", fields: [createurId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Rapport {
+  id             String    @id @default(uuid())
+  date           DateTime  @default(now())
+  activites      String
+  difficultes    String?
+  apprentissages String?
+  valide         Boolean   @default(false)
+  commentaire    String?
+  validateurId   String?
+  validateur     User?     @relation("RapportValidator", fields: [validateurId], references: [id])
+  stagiaireId    String
+  stagiaire      Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+}
+
+model PresenceSession {
+  id        String     @id @default(uuid())
+  token     String     @unique
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+  presences Presence[]
+}
+
+model Presence {
+  id          String           @id @default(uuid())
+  stagiaireId String
+  stagiaire   Stagiaire        @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     PresenceSession? @relation(fields: [sessionId], references: [id])
+  statut      PresenceStatut   @default(PRESENT)
+  ip          String?
+  latitude    Float?
+  longitude   Float?
+  scannedAt   DateTime         @default(now())
+}
+
+model Paiement {
+  id           String         @id @default(uuid()) // UUID String gardé !
+  stagiaireId  String
+  stagiaire    Stagiaire      @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  montant      Float
+  devise       String         @default("EUR")
+  statut       PaiementStatut @default(PLANIFIE)
+  datePrevue   DateTime
+  datePaiement DateTime?
+  reference    String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  tranches     TranchePaiement[] // Relation ajoutée
+}
+
+// 🆕 Nouveau modèle de suivi par tranches
+model TranchePaiement {
+  id              String        @id @default(uuid())
+  paiementId      String        // Changé en String pour matcher l'id parent
+  montant         Float
+  methode         PaymentMethod @default(MOMO)
+  telephonePayeur String?
+  reference       String?       
+  statut          TrancheStatut @default(EN_ATTENTE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  paiement        Paiement      @relation(fields: [paiementId], references: [id], onDelete: Cascade)
+}
+
+model Evaluation {
+  id               String    @id @default(uuid())
+  stagiaireId      String    @unique
+  stagiaire        Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  evaluateurId     String
+  evaluateur       User      @relation("Evaluator", fields: [evaluateurId], references: [id])
+  ponctualite      Float
+  rapports         Float
+  taches           Float
+  competences      Float
+  comportement     Float
+  noteFinale       Float
+  mention          String
+  commentaire      String?
+  attestationUrl   String?
+  attestationToken String?   @unique
+  createdAt        DateTime  @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  cible     String?
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now())
+}
