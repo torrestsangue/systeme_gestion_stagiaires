@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import bcrypt from 'bcrypt';
-import { Role } from '@prisma/client';
+import { Role, PaiementStatut } from '@prisma/client';
 
 /* ─────────────────────────────────────────
    HELPER — numéro de dossier unique
@@ -275,10 +275,11 @@ export const stagiaireController = {
       ]);
 
       const rapportsEnAttente = await prisma.rapport.count({ where: { valide: false } });
-      const paiementsAValider = await prisma.paiement.count({ where: { statut: 'EN_ATTENTE' } });
+      const paiementsAValider = await prisma.paiement.count({ where: { statut: PaiementStatut.EN_ATTENTE } });
 
       return res.json({ total, actifs, presentsAujourdhui, rapportsEnAttente, paiementsAValider });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('StagiaireController.stats:', error?.message ?? error, error?.stack ?? 'no-stack');
       return res.status(500).json({ error: 'Erreur lors du chargement des statistiques.' });
     }
   },

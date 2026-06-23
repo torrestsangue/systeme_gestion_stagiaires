@@ -13,7 +13,7 @@ export const PaiementController = {
       if (!stagiaireId || !montant || !datePrevue) {
         return res.status(400).json({ error: 'stagiaireId, montant et datePrevue sont obligatoires.' });
       }
-      if (montant <= 0) {
+      if (Number(montant) <= 0) {
         return res.status(400).json({ error: 'Le montant doit être positif.' });
       }
 
@@ -51,13 +51,13 @@ export const PaiementController = {
     }
   },
 
-  // ─── 2. LISTE DES PAIEMENTS (Avec calcul dynamique du montantPaye) ────────
+  // ─── 2. LISTE DES PAIEMENTS (calcul dynamique montantPaye via tranches) ────
   list: async (req: Request, res: Response) => {
     try {
       const { stagiaireId, statut, dateMin, dateMax, page = '1', limit = '20' } = req.query;
 
       const where: any = {};
-      if (stagiaireId) where.stagiaireId = stagiaireId;
+      if (stagiaireId) where.stagiaireId = stagiaireId as string;
       if (statut)      where.statut      = statut;
       if (dateMin) where.datePrevue = { ...where.datePrevue, gte: new Date(dateMin as string) };
       if (dateMax) where.datePrevue = { ...where.datePrevue, lte: new Date(dateMax as string) };
@@ -68,37 +68,36 @@ export const PaiementController = {
         prisma.paiement.findMany({
           where,
           orderBy: { datePrevue: 'desc' },
-          skip, take: Number(limit),
+          skip,
+          take: Number(limit),
           include: {
             stagiaire: { include: { user: { select: { nom: true, prenom: true, email: true } } } },
-            tranches: true, // Récupère les tranches associées
+            tranches: true,
           },
         }),
       ]);
 
-      // Injection dynamique de "montantPaye" pour correspondre à ton composant React
-      const itemsFormates = items.map(p => {
+      // Injection de montantPaye calculé depuis les tranches REUSSIT
+      const itemsFormates = items.map((p) => {
         const montantPaye = p.tranches
-          .filter(t => t.statut === TrancheStatut.REUSSIT)
+          .filter((t) => t.statut === TrancheStatut.REUSSIT)
           .reduce((sum, t) => sum + t.montant, 0);
         return { ...p, montantPaye };
       });
 
-      // Calcul du budget global du Dashboard
+      // Calcul du budget dashboard
       const tous = await prisma.paiement.findMany({ where, include: { tranches: true } });
-      const totalPayeGlobal = tous.reduce((acc, p) => {
-        const payeSurFiche = p.tranches
-          .filter(t => t.statut === TrancheStatut.REUSSIT)
+      const budgetTotalSaisi   = tous.reduce((s, p) => s + p.montant, 0);
+      const totalPayeGlobal    = tous.reduce((acc, p) => {
+        return acc + p.tranches
+          .filter((t) => t.statut === TrancheStatut.REUSSIT)
           .reduce((s, t) => s + t.montant, 0);
-        return acc + payeSurFiche;
       }, 0);
 
-      const budgetTotalSaisi = tous.reduce((s, p) => s + p.montant, 0);
-
       const budget = {
-        total:    budgetTotalSaisi,
-        paye:     totalPayeGlobal,
-        attente:  Math.max(0, budgetTotalSaisi - totalPayeGlobal),
+        total:   budgetTotalSaisi,
+        paye:    totalPayeGlobal,
+        attente: Math.max(0, budgetTotalSaisi - totalPayeGlobal),
       };
 
       return res.json({ total, page: Number(page), limit: Number(limit), budget, items: itemsFormates });
@@ -108,135 +107,218 @@ export const PaiementController = {
     }
   },
 
-  // ─── 3. ENREGISTRER UNE NOUVELLE TRANCHE (Route: PATCH /paiements/:id/statut) ───
-  // Parfaitement synchronisé avec l'action de ton bouton "Enregistrer la tranche" du Front.
-  changerStatut: async (req: Request, res: Response) => {
+  // ─── 3. AJOUTER UNE TRANCHE (POST /paiements/:id/tranches) ───────────────
+  // Correspond à paiementService.enregistrerTranche() côté frontend.
+  // L'id dans req.params est l'UUID String du paiement parent.
+  ajouterTranche: async (req: Request, res: Response) => {
     try {
-      const id = Number(req.params.id);
+      const { id } = req.params;            // UUID String — corrigé (plus de Number())
       const { montant, methode, reference, telephone } = req.body;
-      const user = (req as any).user; // Récupéré via le middleware authenticate
+      const user = (req as any).user;
 
       if (!montant || Number(montant) <= 0) {
         return res.status(400).json({ error: 'Un montant valide et positif est requis.' });
       }
 
-      // 1. Recherche de la fiche de paiement parent
       const paiement = await prisma.paiement.findUnique({
-        where: { id },
-        include: { tranches: true }
+        where: { id },                      // String UUID direct
+        include: { tranches: true },
       });
       if (!paiement) return res.status(404).json({ error: 'Fiche de paiement introuvable.' });
 
-      // 2. Vérification du reste à payer
+      // Calcul du reste à payer
       const totalDejaPaye = paiement.tranches
-        .filter(t => t.statut === TrancheStatut.REUSSIT)
+        .filter((t) => t.statut === TrancheStatut.REUSSIT)
         .reduce((sum, t) => sum + t.montant, 0);
       const resteAPayer = paiement.montant - totalDejaPaye;
 
-      if (Number(montant) > resteAPayer) {
-        return res.status(400).json({ error: `Le versement (${montant}) dépasse le reste à payer (${resteAPayer}).` });
-      }
-
-      // 3. Gestion du statut de la tranche selon le rôle
-      const estStagiaire = user?.role === 'STAGIAIRE';
-      const statutTranche = estStagiaire ? TrancheStatut.EN_ATTENTE : TrancheStatut.REUSSIT;
-
-      // 4. Création de la tranche
-      const nouvelleTranche = await prisma.tranchePaiement.create({
-        data: {
-          paiementId: id,
-          montant: Number(montant),
-          methode: (methode as PaymentMethod) ?? PaymentMethod.MOMO,
-          reference: reference || null,
-          telephonePayeur: telephone || null,
-          statut: statutTranche
-        }
-      });
-
-      // 5. Recalculer le statut global si l'administration effectue l'encaissement direct
-      let paiementMisAJour = paiement;
-      if (!estStagiaire) {
-        const nouveauTotalPaye = totalDejaPaye + Number(montant);
-        let nouveauStatutGlobal = PaiementStatut.PARTIEL;
-
-        if (nouveauTotalPaye >= paiement.montant) {
-          nouveauStatutGlobal = PaiementStatut.PAYE;
-        }
-
-        paiementMisAJour = await prisma.paiement.update({
-          where: { id },
-          data: { 
-            statut: nouveauStatutGlobal,
-            datePaiement: nouveauStatutGlobal === PaiementStatut.PAYE ? new Date() : null,
-            reference: reference || paiement.reference
-          },
-          include: { tranches: true }
+      if (Number(montant) > resteAPayer + 0.01) {
+        return res.status(400).json({
+          error: `Le versement (${montant}) dépasse le reste à payer (${resteAPayer.toFixed(2)}).`,
         });
       }
 
-      // Log de sécurité
-      await prisma.auditLog.create({
+      // Statut de la tranche selon le rôle
+      const estStagiaire   = user?.role === 'STAGIAIRE';
+      const statutTranche  = estStagiaire ? TrancheStatut.EN_ATTENTE : TrancheStatut.REUSSIT;
+
+      const nouvelleTranche = await prisma.tranchePaiement.create({
         data: {
-          userId: user?.id,
-          action: 'PAIEMENT_TRANCHE_AJOUT',
-          cible: 'TranchePaiement',
-          details: `Tranche de ${montant} ajoutée pour le paiement ${id}. Statut: ${statutTranche}`,
-          ip: req.ip,
+          paiementId:      id,              // String UUID
+          montant:         Number(montant),
+          methode:         (methode as PaymentMethod) ?? PaymentMethod.MOMO,
+          reference:       reference  || null,
+          telephonePayeur: telephone  || null,
+          statut:          statutTranche,
         },
       });
 
-      return res.json({ 
-        message: estStagiaire ? 'Preuve de tranche soumise, en attente.' : 'Tranche encaissée avec succès.', 
-        paiement: paiementMisAJour,
-        tranche: nouvelleTranche
+      // Recalcul du statut global du paiement (seulement si admin encaisse directement)
+      let paiementMisAJour: any = paiement;
+      if (!estStagiaire) {
+        const nouveauTotalPaye   = totalDejaPaye + Number(montant);
+        const nouveauStatutGlobal =
+          nouveauTotalPaye >= paiement.montant ? PaiementStatut.PAYE : PaiementStatut.PARTIEL;
+
+        paiementMisAJour = await prisma.paiement.update({
+          where: { id },
+          data: {
+            statut:       nouveauStatutGlobal,
+            datePaiement: nouveauStatutGlobal === PaiementStatut.PAYE ? new Date() : null,
+            reference:    reference || paiement.reference,
+          },
+          include: { tranches: true },
+        });
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          userId:  user?.id,
+          action:  'PAIEMENT_TRANCHE_AJOUT',
+          cible:   'TranchePaiement',
+          details: `Tranche ${montant} ajoutée sur paiement ${id}. Statut tranche: ${statutTranche}`,
+          ip:      req.ip,
+        },
       });
 
+      return res.json({
+        message:  estStagiaire ? 'Preuve soumise, en attente de validation.' : 'Tranche encaissée avec succès.',
+        paiement: { ...paiementMisAJour, montantPaye: (totalDejaPaye + (estStagiaire ? 0 : Number(montant))) },
+        tranche:  nouvelleTranche,
+      });
     } catch (error) {
-      console.error('PaiementController.changerStatut (Tranches):', error);
-      return res.status(500).json({ error: 'Erreur serveur lors de la gestion du versement.' });
+      console.error('PaiementController.ajouterTranche:', error);
+      return res.status(500).json({ error: 'Erreur serveur lors de l\'enregistrement de la tranche.' });
     }
   },
 
-  // ─── 4. WEBHOOK POUR OPÉRATEURS EXTERNES (Optionnel - Route Publique) ───────
+  // ─── 4. SOLDER UN PAIEMENT EN TOTALITÉ (PATCH /paiements/:id/solder) ──────
+  // Correspond à paiementService.changerStatut(id, 'PAYE') côté frontend.
+  // Réservé aux admins — le middleware de route doit vérifier le rôle si besoin.
+  solderPaiement: async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;            // UUID String
+      const userId = (req as any).user?.id;
+
+      const paiement = await prisma.paiement.findUnique({ where: { id } });
+      if (!paiement) return res.status(404).json({ error: 'Paiement introuvable.' });
+
+      if (paiement.statut === PaiementStatut.PAYE) {
+        return res.status(400).json({ error: 'Ce paiement est déjà soldé.' });
+      }
+
+      const updated = await prisma.paiement.update({
+        where: { id },
+        data: {
+          statut:       PaiementStatut.PAYE,
+          datePaiement: new Date(),
+        },
+        include: {
+          stagiaire: { include: { user: { select: { nom: true, prenom: true } } } },
+          tranches: true,
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action:  'PAIEMENT_SOLDE',
+          cible:   'Paiement',
+          details: `Paiement ${id} soldé manuellement par admin`,
+          ip:      req.ip,
+        },
+      });
+
+      return res.json({ message: 'Paiement soldé en totalité.', paiement: updated });
+    } catch (error) {
+      console.error('PaiementController.solderPaiement:', error);
+      return res.status(500).json({ error: 'Erreur lors de la validation du paiement.' });
+    }
+  },
+
+  // ─── 5. SUPPRIMER UN PAIEMENT (admin) ────────────────────────────────────
+  delete: async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const paiement = await prisma.paiement.findUnique({ where: { id } });
+      if (!paiement) return res.status(404).json({ error: 'Paiement introuvable.' });
+      if (paiement.statut === PaiementStatut.PAYE) {
+        return res.status(400).json({ error: 'Impossible de supprimer un paiement déjà effectué.' });
+      }
+      await prisma.paiement.delete({ where: { id } });
+      return res.json({ message: 'Paiement supprimé.' });
+    } catch {
+      return res.status(500).json({ error: 'Erreur lors de la suppression.' });
+    }
+  },
+
+  // ─── 6. TABLEAU DE BORD FINANCIER ────────────────────────────────────────
+  dashboard: async (_req: Request, res: Response) => {
+    try {
+      const now          = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+      const [tous, mois, parStatut] = await Promise.all([
+        prisma.paiement.aggregate({ _sum: { montant: true }, _count: true }),
+        prisma.paiement.aggregate({
+          where: { datePrevue: { gte: startOfMonth, lte: endOfMonth } },
+          _sum: { montant: true },
+          _count: true,
+        }),
+        prisma.paiement.groupBy({
+          by: ['statut'],
+          _sum: { montant: true },
+          _count: true,
+        }),
+      ]);
+
+      return res.json({
+        global:       { total: tous._count,  montant: tous._sum.montant ?? 0 },
+        moisEnCours:  { total: mois._count,  montant: mois._sum.montant ?? 0 },
+        parStatut:    parStatut.map((s) => ({
+          statut:  s.statut,
+          count:   s._count,
+          montant: s._sum.montant ?? 0,
+        })),
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'Erreur lors du chargement du tableau de bord.' });
+    }
+  },
+
+  // ─── 7. WEBHOOK PAIEMENT OPÉRATEUR EXTERNE (route publique optionnelle) ───
   webhookVerification: async (req: Request, res: Response) => {
     try {
-      const { custom_id, transaction_id, status } = req.body; 
-      // custom_id doit contenir l'ID de la TranchePaiement (UUID) générée au moment du paiement en ligne
-
+      const { custom_id, transaction_id, status } = req.body;
       const tranche = await prisma.tranchePaiement.findUnique({ where: { id: custom_id } });
       if (!tranche) return res.status(404).json({ error: 'Tranche introuvable.' });
 
       const statutSucces = status === 'SUCCESS';
-      
-      // Mise à jour de la tranche
-      const trancheMaj = await prisma.tranchePaiement.update({
+      await prisma.tranchePaiement.update({
         where: { id: custom_id },
         data: {
-          statut: statutSucces ? TrancheStatut.REUSSIT : TrancheStatut.ECHOUE,
-          reference: transaction_id
-        }
+          statut:    statutSucces ? TrancheStatut.REUSSIT : TrancheStatut.ECHOUE,
+          reference: transaction_id,
+        },
       });
 
-      // Recalcul global du statut si le paiement est réussi
       if (statutSucces) {
         const paiement = await prisma.paiement.findUnique({
           where: { id: tranche.paiementId },
-          include: { tranches: true }
+          include: { tranches: true },
         });
-
         if (paiement) {
-          const totalPaye = paiement.tranches
-            .filter(t => t.statut === TrancheStatut.REUSSIT)
-            .reduce((sum, t) => sum + t.montant, 0);
-
+          const totalPaye    = paiement.tranches
+            .filter((t) => t.statut === TrancheStatut.REUSSIT)
+            .reduce((s, t) => s + t.montant, 0);
           const nouveauStatut = totalPaye >= paiement.montant ? PaiementStatut.PAYE : PaiementStatut.PARTIEL;
-
           await prisma.paiement.update({
             where: { id: paiement.id },
-            data: { 
-              statut: nouveauStatut,
-              datePaiement: nouveauStatut === PaiementStatut.PAYE ? new Date() : null
-            }
+            data: {
+              statut:       nouveauStatut,
+              datePaiement: nouveauStatut === PaiementStatut.PAYE ? new Date() : null,
+            },
           });
         }
       }
@@ -246,10 +328,4 @@ export const PaiementController = {
       return res.status(500).json({ error: 'Erreur Webhook.' });
     }
   },
-
-  // Les autres méthodes (updateStatut, paiementMasse, delete, dashboard) restent identiques...
-  updateStatut: async (req: Request, res: Response) => { /* Code existant... */ },
-  paiementMasse: async (req: Request, res: Response) => { /* Code existant... */ },
-  delete: async (req: Request, res: Response) => { /* Code existant... */ },
-  dashboard: async (_req: Request, res: Response) => { /* Code existant... */ }
 };

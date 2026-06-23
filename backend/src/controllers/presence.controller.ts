@@ -263,6 +263,44 @@ export const PresenceController = {
     }
   },
 
+  // ─── 7. PRÉSENCE HEBDOMADAIRE (counts par jour, Lundi→Dimanche) ─────────
+  semaine: async (_req: Request, res: Response) => {
+    try {
+      const now = new Date();
+      const jourActuel = now.getDay(); // 0 = Dimanche
+      const diff = now.getDate() - jourActuel + (jourActuel === 0 ? -6 : 1); // obtenir Lundi
+      const debutSemaine = new Date(now);
+      debutSemaine.setDate(diff);
+      debutSemaine.setHours(0, 0, 0, 0);
+
+      const finSemaine = new Date(debutSemaine);
+      finSemaine.setDate(debutSemaine.getDate() + 7);
+
+      const presences = await prisma.presence.findMany({
+        where: { scannedAt: { gte: debutSemaine, lt: finSemaine } },
+        select: { id: true, statut: true, scannedAt: true },
+      });
+
+      const joursLabel = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+
+      const data = Array.from({ length: 7 }, (_, i) => {
+        const date = new Date(debutSemaine);
+        date.setDate(debutSemaine.getDate() + i);
+        const label = joursLabel[date.getDay()];
+        const count = presences.filter(p => {
+          const d = new Date(p.scannedAt);
+          return d.toLocaleDateString() === date.toLocaleDateString() && (p.statut === 'PRESENT' || p.statut === 'RETARD');
+        }).length;
+        return { jour: label, presents: count };
+      });
+
+      return res.json({ semaine: { debut: debutSemaine, fin: finSemaine }, data });
+    } catch (error) {
+      console.error('PresenceController.semaine:', error);
+      return res.status(500).json({ error: 'Erreur lors du chargement des présences hebdomadaires.' });
+    }
+  },
+
   // ─── 7. HISTORIQUE DES PRÉSENCES D'UN STAGIAIRE ───────────────────────────
   historique: async (req: Request, res: Response) => {
     try {

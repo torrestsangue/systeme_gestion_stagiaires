@@ -105,26 +105,35 @@ authRouter.get('/rapports/:id',        authenticate, RapportController.getById);
 authRouter.patch('/rapports/:id/valider', authenticate, RapportController.valider);
 authRouter.delete('/rapports/:id',     authenticate, RapportController.delete);
 
-/**
- * ─── PAIEMENTS ─────────────────────────────────────────────────────────────
- */
+// ─── SECTION PAIEMENTS à remplacer dans ton authRouter.ts ────────────────────
+// Remplace le bloc "PAIEMENTS" existant par celui-ci.
 
-authRouter.get('/paiements',                 authenticate, PaiementController.list);
-authRouter.post('/paiements',                authenticate, PaiementController.create);
-authRouter.get('/paiements/dashboard/stats', authenticate, PaiementController.dashboard);
-authRouter.patch('/paiements/:id/statut',    authenticate, PaiementController.changerStatut);
-
-// Route publique pour recevoir les réponses des APIs de paiement (Momo/Orange) sans token d'authentification
-authRouter.post('/paiements/webhook',        PaiementController.webhookVerification);
 
 /**
- * ─── PRÉSENCES (QR CODES) ──────────────────────────────────────────────────
+ * ─── PAIEMENTS ───────────────────────────────────────────────────────────────
+ *
+ * Routes et leurs correspondances dans sgs.service.ts :
+ *
+ *  GET    /paiements                  → paiementService.list(params)
+ *  POST   /paiements                  → paiementService.create(data)
+ *  POST   /paiements/:id/tranches     → paiementService.enregistrerTranche(payload)
+ *  PATCH  /paiements/:id/solder       → paiementService.changerStatut(id, 'PAYE')
+ *  DELETE /paiements/:id              → (à ajouter au service si besoin)
+ *  GET    /paiements/dashboard/stats  → paiementService.stats()
  */
+authRouter.get('/paiements',                  authenticate, PaiementController.list);
+authRouter.post('/paiements',                 authenticate, PaiementController.create);
+authRouter.post('/paiements/:id/tranches',    authenticate, PaiementController.ajouterTranche);
+authRouter.patch('/paiements/:id/solder',     authenticate, PaiementController.solderPaiement);
+authRouter.delete('/paiements/:id',           authenticate, PaiementController.delete);
+authRouter.get('/paiements/dashboard/stats',  authenticate, PaiementController.dashboard);
+
 /**
  * ─── PRÉSENCES (QR CODES) ──────────────────────────────────────────────────
  */
 authRouter.post('/presences/session',                 authenticate, PresenceController.genererSession);
 authRouter.get('/presences/session-active',           authenticate, PresenceController.sessionActive);
+authRouter.get('/presences/semaine',                  authenticate, PresenceController.semaine);
 authRouter.post('/presences/pointer',                  authenticate, PresenceController.pointer); // ✅ Corrigé !
 authRouter.post('/presences/teletravail',              authenticate, PresenceController.teletravail);
 authRouter.patch('/presences/:id/valider',            authenticate, PresenceController.validerPresence);

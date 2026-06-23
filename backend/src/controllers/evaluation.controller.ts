@@ -65,7 +65,8 @@ export const EvaluationController = {
       if (!stagiaire) return res.status(404).json({ error: 'Stagiaire introuvable.' });
 
       // Empêcher une double évaluation
-      const existing = await prisma.evaluation.findUnique({ where: { stagiaireId } });
+      // Utiliser findFirst si stagiaireId n'est pas unique dans le schéma Prisma
+      const existing = await prisma.evaluation.findFirst({ where: { stagiaireId } });
       if (existing) {
         return res.status(409).json({
           error: 'Ce stagiaire a déjà une évaluation. Utilisez PUT /evaluations/:id pour la modifier.',
@@ -190,7 +191,7 @@ export const EvaluationController = {
         if (!stag || stag.id !== stagiaireId) return res.status(403).json({ error: 'Accès refusé.' });
       }
 
-      const evaluation = await prisma.evaluation.findUnique({
+      const evaluation = await prisma.evaluation.findFirst({
         where: { stagiaireId },
         include: {
           stagiaire:  { include: { user: { select: { nom: true, prenom: true, email: true } } } },
