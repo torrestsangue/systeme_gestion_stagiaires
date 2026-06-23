@@ -18,8 +18,7 @@ import NotFound from '../pages/NotFound';
 import { Layout } from '../components/layout/Layout';
 import { PrivateRoute } from './PrivateRoute';
 
-/* ESPACE STAGIAIRE */
-import StagiaireDashboard from '../pages/stagiaire/stagiaireDashboard';
+
 
 export function AppRoutes() {
   return (
@@ -84,14 +83,7 @@ export function AppRoutes() {
       {/* =========================
           ESPACE STAGIAIRE
       ========================= */}
-      <Route
-        path="/stagiaire"
-        element={
-          <PrivateRoute>
-            <StagiaireDashboard />
-          </PrivateRoute>
-        }
-      />
+     
 
       {/* =========================
           PAGE INTROUVABLE

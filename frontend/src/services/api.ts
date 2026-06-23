@@ -28,7 +28,7 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 
 const api: AxiosInstance = axios.create({
-  baseURL: "http://localhost:4000/api/auth",
+  baseURL: (import.meta.env.VITE_API_URL as string) ?? "http://localhost:4000/api/auth",
 });
 
 let isRefreshing = false;

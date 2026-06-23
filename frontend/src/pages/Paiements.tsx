@@ -1,14 +1,10 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-  CreditCard,
-  Calendar,
-  PlusCircle,
-  CheckCircle,
-  AlertCircle,
-  History,
-  ClipboardList,
-  UserPlus,
+  CreditCard, PlusCircle, CheckCircle, AlertCircle,
+  History, ClipboardList, UserPlus, ChevronDown,
+  ChevronRight, Smartphone, Banknote, CreditCard as CardIcon,
+  Wifi, Calendar, TrendingUp, Clock, X,
 } from 'lucide-react';
 
 import { paiementService, stagiaireService } from '../services/sgs.service';
@@ -17,17 +13,26 @@ import { Button } from '../components/ui/Button';
 import { useAuthStore } from '../store/auth.store';
 import { fmtMontant, fmtDate } from '../utils/format';
 
-const tone: Record<string, 'neutral' | 'warning' | 'success' | 'danger'> = {
-  PLANIFIE: 'neutral',
-  EN_ATTENTE: 'warning',
-  PAYE: 'success',
-  PARTIEL: 'warning',
-  LITIGE: 'danger',
+// ─── TYPES ───────────────────────────────────────────────────────────────────
+type StatutPaiement = 'PLANIFIE' | 'PARTIEL' | 'PAYE' | 'LITIGE' | 'EN_ATTENTE';
+type MethodePaiement = 'MOMO' | 'ORANGE' | 'CARD' | 'CASH';
+
+const STATUT_CONFIG: Record<string, { tone: 'neutral'|'warning'|'success'|'danger'; label: string; color: string }> = {
+  PLANIFIE:   { tone: 'neutral',  label: 'Planifié',     color: '#6b7280' },
+  EN_ATTENTE: { tone: 'warning',  label: 'En attente',   color: '#f59e0b' },
+  PARTIEL:    { tone: 'warning',  label: 'Partiel',      color: '#f59e0b' },
+  PAYE:       { tone: 'success',  label: 'Soldé',        color: '#10b981' },
+  LITIGE:     { tone: 'danger',   label: 'Litige',       color: '#ef4444' },
 };
 
-// ─── HELPER : normalise la réponse de stagiaireService.list() ──────────────
-// Adapte cette fonction si la forme de ta réponse diffère
-// (ex: { data: [...] } au lieu de { items: [...] }).
+const METHODE_CONFIG: Record<MethodePaiement, { icon: React.ReactNode; label: string; color: string }> = {
+  MOMO:   { icon: <Smartphone size={16} />,  label: 'MTN Mobile Money', color: '#f59e0b' },
+  ORANGE: { icon: <Wifi size={16} />,        label: 'Orange Money',     color: '#f97316' },
+  CARD:   { icon: <CardIcon size={16} />,    label: 'Carte bancaire',   color: '#6366f1' },
+  CASH:   { icon: <Banknote size={16} />,    label: 'Espèces',          color: '#10b981' },
+};
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function normalizeStagiaireList(response: any): any[] {
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.items)) return response.items;
@@ -35,523 +40,720 @@ function normalizeStagiaireList(response: any): any[] {
   return [];
 }
 
-// ─── HELPER : résout le stagiaireId du user actuellement connecté ─────────
-// Stratégie robuste à plusieurs niveaux, du plus direct au plus coûteux :
-//   1) Le store d'auth contient déjà l'id stagiaire (cas idéal, zéro appel réseau)
-//   2) Un appel dédié /stagiaires/me existe côté backend
-//   3) Repli : on cherche dans la liste des stagiaires celui dont userId correspond
 async function resolveStagiaireId(user: any): Promise<string | null> {
   if (!user) return null;
-
-  // 1) Champs possibles directement sur l'objet user du store
-  const directCandidates = [user.stagiaireId, user.stagiaire?.id];
-  for (const candidate of directCandidates) {
-    if (candidate) return candidate;
-  }
-
-  // 2) Endpoint dédié, si disponible côté backend
-  try {
-    if (stagiaireService?.getMonProfil) {
-      const profil = await stagiaireService.getMonProfil();
-      const id = profil?.id ?? profil?.stagiaire?.id;
-      if (id) return id;
-    }
-  } catch {
-    // Pas grave, on tente le repli ci-dessous
-  }
-
-  // 3) Repli : recherche dans la liste complète par correspondance userId
+  const direct = [user.stagiaireId, user.stagiaire?.id].find(Boolean);
+  if (direct) return direct;
   try {
     const response = await stagiaireService.list();
     const liste = normalizeStagiaireList(response);
-    const match = liste.find((s: any) => s.userId === user.id || s.user?.id === user.id);
-    return match?.id ?? null;
-  } catch {
-    return null;
-  }
+    return liste.find((s: any) => s.userId === user.id || s.user?.id === user.id)?.id ?? null;
+  } catch { return null; }
 }
 
+// ─── SOUS-COMPOSANT : BARRE DE PROGRESSION ───────────────────────────────────
+function ProgressBar({ paye, total, devise }: { paye: number; total: number; devise?: string }) {
+  const pct = total > 0 ? Math.min(100, (paye / total) * 100) : 0;
+  const color = pct >= 100 ? '#10b981' : pct > 0 ? '#6366f1' : '#e2e8f0';
+  return (
+    <div className="mt-2">
+      <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+        <span>{fmtMontant(paye, devise)} versé</span>
+        <span className="font-semibold" style={{ color }}>{pct.toFixed(0)}%</span>
+      </div>
+      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${pct}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── SOUS-COMPOSANT : HISTORIQUE DES TRANCHES ────────────────────────────────
+function TrancheHistorique({ tranches, devise }: { tranches: any[]; devise?: string }) {
+  if (!tranches?.length) {
+    return (
+      <div className="py-4 text-center text-xs text-slate-400">
+        Aucun versement enregistré sur cette fiche.
+      </div>
+    );
+  }
+  return (
+    <div className="divide-y divide-slate-50">
+      {tranches.map((t: any, i: number) => {
+        const methode = METHODE_CONFIG[t.methode as MethodePaiement] ?? METHODE_CONFIG.CASH;
+        const statutColor = t.statut === 'REUSSIT' ? 'text-emerald-600 bg-emerald-50'
+          : t.statut === 'EN_ATTENTE' ? 'text-amber-600 bg-amber-50'
+          : 'text-red-500 bg-red-50';
+        return (
+          <div key={t.id ?? i} className="flex items-center gap-3 py-2.5 px-4">
+            <span className="text-slate-300" style={{ color: methode.color }}>{methode.icon}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-700 font-mono">
+                  {fmtMontant(t.montant, devise)}
+                </span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statutColor}`}>
+                  {t.statut === 'REUSSIT' ? 'Validé' : t.statut === 'EN_ATTENTE' ? 'En attente' : 'Échoué'}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                {methode.label}{t.reference ? ` · ${t.reference}` : ''}
+                {t.telephonePayeur ? ` · ${t.telephonePayeur}` : ''}
+              </div>
+            </div>
+            <span className="text-[10px] text-slate-400 shrink-0">{fmtDate(t.createdAt)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── COMPOSANT PRINCIPAL ─────────────────────────────────────────────────────
 export default function Paiements() {
-  // ─── ÉTATS & AUTH CONFIG ──────────────────────────────────────────────────
   const user = useAuthStore((s) => s.user);
   const role = user?.role;
   const isAdmin = role !== 'STAGIAIRE';
 
-  const [list, setList] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>({});
+  const [list, setList]           = useState<any[]>([]);
+  const [stats, setStats]         = useState<any>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Id stagiaire résolu pour l'utilisateur connecté (uniquement pertinent si role === 'STAGIAIRE')
+  // Résolution stagiaire connecté
   const [monStagiaireId, setMonStagiaireId] = useState<string | null>(null);
   const [resolvingProfil, setResolvingProfil] = useState(role === 'STAGIAIRE');
 
-  // États pour la gestion des fenêtres modales — versement de tranche
+  // Modal versement
   const [activePaiement, setActivePaiement] = useState<any>(null);
-  const [showTrancheModal, setShowTrancheModal] = useState(false);
-  const [montantTranche, setMontantTranche] = useState('');
-  const [referenceTranche, setReferenceTranche] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showTrancheModal, setShowTrancheModal]   = useState(false);
+  const [montantTranche, setMontantTranche]       = useState('');
+  const [referenceTranche, setReferenceTranche]   = useState('');
+  const [methodeTranche, setMethodeTranche]       = useState<MethodePaiement>('MOMO');
+  const [telephoneTranche, setTelephoneTranche]   = useState('');
+  const [isSubmitting, setIsSubmitting]           = useState(false);
 
-  // États pour la modale de création de paiement (admin uniquement)
+  // Modal création (admin)
   const [showCreationModal, setShowCreationModal] = useState(false);
-  const [stagiaires, setStagiaires] = useState<any[]>([]);
+  const [stagiaires, setStagiaires]               = useState<any[]>([]);
   const [loadingStagiaires, setLoadingStagiaires] = useState(false);
   const [creation, setCreation] = useState({
-    stagiaireId: '',
-    montant: '',
-    devise: 'FCFA',
-    datePrevue: '',
-    reference: '',
+    stagiaireId: '', montant: '', devise: 'FCFA', datePrevue: '', reference: '',
   });
   const [isCreating, setIsCreating] = useState(false);
 
-  // ─── RÉSOLUTION DU STAGIAIRE CONNECTÉ (une seule fois) ─────────────────────
+  // ─── RÉSOLUTION STAGIAIRE ──────────────────────────────────────────────────
   useEffect(() => {
-    if (role !== 'STAGIAIRE') {
-      setResolvingProfil(false);
-      return;
-    }
+    if (role !== 'STAGIAIRE') { setResolvingProfil(false); return; }
     let cancelled = false;
-    setResolvingProfil(true);
     resolveStagiaireId(user).then((id) => {
       if (cancelled) return;
       setMonStagiaireId(id);
       setResolvingProfil(false);
-      if (!id) {
-        toast.error("Impossible d'identifier votre dossier stagiaire. Contactez l'administration.");
-      }
+      if (!id) toast.error("Impossible d'identifier votre dossier. Contactez l'administration.");
     });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelled = true; };
   }, [role, user?.id]);
 
-  // ─── SYNCHRONISATION DES DONNÉES BACKEND ──────────────────────────────────
+  // ─── CHARGEMENT ───────────────────────────────────────────────────────────
   const reload = useCallback(() => {
-    // Un stagiaire ne doit jamais déclencher la requête tant que son id n'est pas résolu,
-    // sinon il verrait temporairement (ou par erreur) les paiements de tout le monde.
     if (role === 'STAGIAIRE' && !monStagiaireId) return;
-
     setIsLoading(true);
     const params = role === 'STAGIAIRE' ? { stagiaireId: monStagiaireId } : undefined;
-
-    paiementService
-      .list(params)
+    paiementService.list(params)
       .then((response: any) => {
-        if (response && response.items) {
+        if (response?.items) {
           setList(response.items);
-          if (response.budget) {
-            setStats({
-              total: response.budget.total ?? 0,
-              paye: response.budget.paye ?? 0,
-              enAttente: response.budget.attente ?? 0,
-              nombre: response.total ?? 0,
-            });
-          }
-        } else if (Array.isArray(response)) {
-          setList(response);
+          setStats({
+            total:     response.budget?.total   ?? 0,
+            paye:      response.budget?.paye    ?? 0,
+            enAttente: response.budget?.attente ?? 0,
+            nombre:    response.total           ?? 0,
+          });
         } else {
-          setList([]);
+          setList(Array.isArray(response) ? response : []);
         }
       })
       .catch((err) => {
         console.error('Erreur de chargement des paiements:', err);
-        setList([]);
-        setStats({});
+        setList([]); setStats({});
       })
       .finally(() => setIsLoading(false));
   }, [role, monStagiaireId]);
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  useEffect(() => { reload(); }, [reload]);
 
-  // ─── CHARGEMENT DE LA LISTE DES STAGIAIRES (pour le modal admin) ──────────
+  // ─── OUVRIR MODAL ADMIN ────────────────────────────────────────────────────
   const ouvrirCreationModal = () => {
     setShowCreationModal(true);
     if (stagiaires.length === 0) {
       setLoadingStagiaires(true);
-      stagiaireService
-        .list()
-        .then((response: any) => setStagiaires(normalizeStagiaireList(response)))
-        .catch(() => {
-          toast.error('Impossible de charger la liste des stagiaires.');
-          setStagiaires([]);
-        })
+      stagiaireService.list()
+        .then((r: any) => setStagiaires(normalizeStagiaireList(r)))
+        .catch(() => { toast.error('Impossible de charger les stagiaires.'); setStagiaires([]); })
         .finally(() => setLoadingStagiaires(false));
     }
   };
 
-  // ─── ACTIONS : ENREGISTREMENT ET VALIDATION DES TRANCHES ──────────────────
+  const fermerTrancheModal = () => {
+    setShowTrancheModal(false);
+    setActivePaiement(null);
+    setMontantTranche('');
+    setReferenceTranche('');
+    setTelephoneTranche('');
+    setMethodeTranche('MOMO');
+  };
+
+  // ─── AJOUTER TRANCHE ──────────────────────────────────────────────────────
   const handleAjouterTranche = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activePaiement) return;
-
     const montantNum = parseFloat(montantTranche);
     const resteAPayer = activePaiement.montant - (activePaiement.montantPaye ?? 0);
-
-    if (isNaN(montantNum) || montantNum <= 0) {
-      return toast.error('Veuillez entrer un montant valide supérieur à 0.');
-    }
-    if (montantNum > resteAPayer) {
-      return toast.error(`Le montant excède le reste à payer (${fmtMontant(resteAPayer, activePaiement.devise)}).`);
-    }
+    if (isNaN(montantNum) || montantNum <= 0)
+      return toast.error('Montant invalide.');
+    if (montantNum > resteAPayer + 0.01)
+      return toast.error(`Dépasse le reste à payer (${fmtMontant(resteAPayer, activePaiement.devise)}).`);
 
     setIsSubmitting(true);
     try {
-      const payload = {
+      await paiementService.enregistrerTranche({
         paiementId: activePaiement.id,
-        montant: montantNum,
-        reference: referenceTranche,
-        statut: role === 'STAGIAIRE' ? 'EN_ATTENTE' : 'PAYE',
-      };
-
-      await paiementService.enregistrerTranche(payload);
-
+        montant:    montantNum,
+        reference:  referenceTranche || undefined,
+        methode:    methodeTranche,
+        telephone:  telephoneTranche || undefined,
+      });
       toast.success(
         role === 'STAGIAIRE'
-          ? 'Preuve de paiement soumise avec succès, en attente de vérification !'
-          : 'Tranche de paiement validée et encaissée.'
+          ? 'Versement soumis — en attente de validation.'
+          : 'Versement encaissé avec succès.'
       );
-
-      setShowTrancheModal(false);
-      setActivePaiement(null);
-      setMontantTranche('');
-      setReferenceTranche('');
+      fermerTrancheModal();
       reload();
     } catch (error: any) {
-      toast.error(error?.response?.data?.error ?? "Erreur lors de l'enregistrement du versement");
+      toast.error(error?.response?.data?.error ?? "Erreur lors de l'enregistrement.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // ─── SOLDER TOTALEMENT ────────────────────────────────────────────────────
   const validerPaiementTotal = async (id: string) => {
     try {
       await paiementService.changerStatut(id, 'PAYE');
-      toast.success('Paiement intégral validé ✅');
+      toast.success('Paiement soldé en totalité ✅');
       reload();
-    } catch (error) {
-      toast.error('Erreur lors de la validation globale du paiement');
+    } catch {
+      toast.error('Erreur lors de la validation.');
     }
   };
 
-  // ─── ACTION : CRÉATION D'UN NOUVEAU PAIEMENT (admin) ───────────────────────
+  // ─── CRÉER PAIEMENT ────────────────────────────────────────────────────────
   const handleCreerPaiement = async (e: React.FormEvent) => {
     e.preventDefault();
-
     const montantNum = parseFloat(creation.montant);
-    if (!creation.stagiaireId) {
-      return toast.error('Veuillez sélectionner un stagiaire.');
-    }
-    if (isNaN(montantNum) || montantNum <= 0) {
-      return toast.error('Veuillez entrer un montant valide supérieur à 0.');
-    }
-    if (!creation.datePrevue) {
-      return toast.error('Veuillez indiquer une date limite.');
-    }
-
+    if (!creation.stagiaireId) return toast.error('Sélectionner un stagiaire.');
+    if (isNaN(montantNum) || montantNum <= 0) return toast.error('Montant invalide.');
+    if (!creation.datePrevue) return toast.error('Date limite requise.');
     setIsCreating(true);
     try {
       await paiementService.create({
         stagiaireId: creation.stagiaireId,
-        montant: montantNum,
-        devise: creation.devise || 'FCFA',
-        datePrevue: creation.datePrevue,
-        reference: creation.reference || undefined,
+        montant:     montantNum,
+        devise:      creation.devise || 'FCFA',
+        datePrevue:  creation.datePrevue,
+        reference:   creation.reference || undefined,
       });
-
-      toast.success('Fiche de paiement créée avec succès.');
+      toast.success('Fiche de paiement créée.');
       setShowCreationModal(false);
       setCreation({ stagiaireId: '', montant: '', devise: 'FCFA', datePrevue: '', reference: '' });
       reload();
     } catch (error: any) {
-      toast.error(error?.response?.data?.error ?? 'Erreur lors de la création du paiement.');
+      toast.error(error?.response?.data?.error ?? 'Erreur lors de la création.');
     } finally {
       setIsCreating(false);
     }
   };
 
-  // ─── ÉTAT DE CHARGEMENT INITIAL POUR UN STAGIAIRE NON ENCORE RÉSOLU ───────
+  // ─── ÉTAT CHARGEMENT STAGIAIRE ─────────────────────────────────────────────
   if (role === 'STAGIAIRE' && resolvingProfil) {
     return (
-      <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-400 animate-pulse">
-        Chargement de votre dossier financier...
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <div className="inline-flex items-center gap-3 text-slate-400">
+          <div className="w-5 h-5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+          Chargement de votre dossier financier…
+        </div>
       </div>
     );
   }
 
+  const pctGlobal = stats.total > 0 ? Math.min(100, ((stats.paye ?? 0) / stats.total) * 100) : 0;
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 py-2 animate-fadeIn">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 py-2">
 
-      {/* ─── EN-TÊTE COMPOSANT ──────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-            <CreditCard className="text-indigo-600" size={28} />
-            Paiements & Gratifications
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            {role === 'STAGIAIRE'
-              ? 'Consultez vos fiches de gratifications et déclarez vos paiements par tranche ou par solde.'
-              : 'Suivi budgétaire des stagiaires, échelonnements par tranches et encaissements.'}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {isAdmin && (
-            <Button
-              onClick={ouvrirCreationModal}
-              size="sm"
-              className="bg-indigo-600 hover:bg-indigo-700"
+      {/* ── EN-TÊTE ─────────────────────────────────────────────────────────── */}
+      <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl p-6 text-white shadow-lg shadow-indigo-200">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <CreditCard size={22} className="opacity-80" />
+              <span className="text-[10px] font-bold uppercase tracking-widest opacity-70">
+                {isAdmin ? 'Registre financier' : 'Mes gratifications'}
+              </span>
+            </div>
+            <h1 className="text-2xl font-black tracking-tight">Paiements & Gratifications</h1>
+            <p className="text-xs opacity-60 mt-1">
+              {role === 'STAGIAIRE'
+                ? "Déclarez vos versements et suivez l\u2019état de vos fiches en temps réel."
+                : 'Pilotez les gratifications, encaissez les tranches et soldez les dossiers.'}
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {isAdmin && (
+              <button
+                onClick={ouvrirCreationModal}
+                className="flex items-center gap-1.5 bg-white text-indigo-700 font-bold text-xs px-4 py-2 rounded-xl hover:bg-indigo-50 transition-colors shadow"
+              >
+                <UserPlus size={14} /> Nouvelle fiche
+              </button>
+            )}
+            <button
+              onClick={reload}
+              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-xs px-4 py-2 rounded-xl border border-white/20 transition-colors"
             >
-              <UserPlus size={14} className="mr-1 inline" /> Nouveau paiement
-            </Button>
-          )}
-          <Button onClick={reload} variant="secondary" size="sm" className="border-slate-200">
-            Rafraîchir les données
-          </Button>
+              Rafraîchir
+            </button>
+          </div>
         </div>
+
+        {/* Barre de progression globale */}
+        {stats.total > 0 && (
+          <div className="mt-5 pt-4 border-t border-white/10">
+            <div className="flex justify-between text-[10px] font-mono opacity-70 mb-1.5">
+              <span>Progression globale des encaissements</span>
+              <span className="font-bold">{pctGlobal.toFixed(0)}%</span>
+            </div>
+            <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-400 rounded-full transition-all duration-700"
+                style={{ width: `${pctGlobal}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ─── COMPTEURS ET BUDGETS EN GRILLE ──────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
-        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm group">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Engagé</div>
-          <div className="text-2xl font-black mt-2 text-slate-800">{fmtMontant(stats.total ?? 0)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm group">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider text-emerald-600">Total Validé & Payé</div>
-          <div className="text-2xl font-black mt-2 text-emerald-600">{fmtMontant(stats.paye ?? 0)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm group">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider text-amber-500">Restant / En Attente</div>
-          <div className="text-2xl font-black mt-2 text-amber-500">{fmtMontant(stats.enAttente ?? 0)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm group">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Dossiers traités</div>
-          <div className="text-2xl font-black mt-2 text-slate-700">{stats.nombre ?? 0}</div>
-        </div>
+      {/* ── STATS CARDS ──────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          {
+            label: 'Total engagé',
+            value: fmtMontant(stats.total ?? 0),
+            icon: <TrendingUp size={16} className="text-slate-400" />,
+            sub: `${stats.nombre ?? 0} fiche${(stats.nombre ?? 0) > 1 ? 's' : ''}`,
+            accent: 'border-slate-200',
+          },
+          {
+            label: 'Encaissé & validé',
+            value: fmtMontant(stats.paye ?? 0),
+            icon: <CheckCircle size={16} className="text-emerald-500" />,
+            sub: stats.total > 0 ? `${pctGlobal.toFixed(0)}% du total` : '—',
+            accent: 'border-emerald-100',
+          },
+          {
+            label: 'Reste à percevoir',
+            value: fmtMontant(stats.enAttente ?? 0),
+            icon: <Clock size={16} className="text-amber-500" />,
+            sub: stats.total > 0 ? `${(100 - pctGlobal).toFixed(0)}% restant` : '—',
+            accent: 'border-amber-100',
+          },
+          {
+            label: 'Dossiers actifs',
+            value: stats.nombre ?? 0,
+            icon: <ClipboardList size={16} className="text-indigo-400" />,
+            sub: 'fiches en cours',
+            accent: 'border-indigo-100',
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className={`bg-white rounded-2xl p-4 border ${card.accent} shadow-sm`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{card.label}</span>
+              {card.icon}
+            </div>
+            <div className="text-xl font-black font-mono text-slate-800 truncate">{card.value}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{card.sub}</div>
+          </div>
+        ))}
       </div>
 
-      {/* ─── TABLEAU PRINCIPAL DES ENREGISTREMENTS ──────────────────────────── */}
+      {/* ── TABLEAU EXPANDABLE ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 text-xs uppercase font-bold text-slate-500 tracking-wider border-b">
-              <tr>
-                <th className="p-4 pl-6">Stagiaire</th>
-                <th className="p-4">Dû initial</th>
-                <th className="p-4">Déjà versé</th>
-                <th className="p-4">Date limite</th>
-                <th className="p-4 text-center">Statut</th>
-                <th className="p-4 text-right pr-6">Actions & Paiement</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400 animate-pulse">
-                    Chargement du registre financier en cours...
-                  </td>
-                </tr>
-              ) : list.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="p-12 text-center text-slate-400 font-medium">
-                    <ClipboardList className="mx-auto text-slate-300 mb-2" size={32} />
-                    Aucun historique ou flux financier répertorié.
-                  </td>
-                </tr>
-              ) : (
-                list.map((p) => {
-                  const reste = p.montant - (p.montantPaye ?? 0);
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="p-4 pl-6 font-semibold text-slate-800">
-                        {p.stagiaire && p.stagiaire.user
-                          ? `${p.stagiaire.user.prenom} ${p.stagiaire.user.nom}`
-                          : p.stagiaire?.nom ? `${p.stagiaire.prenom} ${p.stagiaire.nom}` : '—'}
-                      </td>
-                      <td className="p-4 font-mono font-bold text-slate-700">{fmtMontant(p.montant, p.devise)}</td>
-                      <td className="p-4 text-emerald-600 font-mono font-medium">
-                        {p.montantPaye && p.montantPaye > 0 ? fmtMontant(p.montantPaye, p.devise) : '—'}
-                      </td>
-                      <td className="p-4 text-slate-500 font-medium">{fmtDate(p.datePrevue)}</td>
-                      <td className="p-4 text-center whitespace-nowrap">
-                        <Badge tone={tone[p.statut] || 'neutral'}>
-                          {p.statut === 'PARTIEL' ? 'PAYÉ PARTIEL' : p.statut}
-                        </Badge>
-                      </td>
-                      <td className="p-4 text-right pr-6 space-x-2 whitespace-nowrap">
-                        {p.statut !== 'PAYE' && (
-                          <>
-                            <Button
-                              onClick={() => {
-                                setActivePaiement(p);
-                                setMontantTranche(reste.toString());
-                                setShowTrancheModal(true);
-                              }}
-                              size="sm"
-                              variant="secondary"
-                              className="border-slate-200 hover:bg-slate-50 text-xs py-1.5"
-                            >
-                              <PlusCircle size={14} className="mr-1 inline" /> Versement
-                            </Button>
+        <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+            Fiches de paiement
+          </span>
+          <span className="text-xs text-slate-400">{list.length} résultat{list.length > 1 ? 's' : ''}</span>
+        </div>
 
-                            {isAdmin && (
-                              <Button
-                                onClick={() => validerPaiementTotal(p.id)}
-                                size="sm"
-                                className="bg-indigo-600 hover:bg-indigo-700 text-xs py-1.5"
-                              >
-                                Tout solder
-                              </Button>
-                            )}
-                          </>
-                        )}
-                        {p.statut === 'PAYE' && (
-                          <span className="text-xs text-emerald-600 font-semibold inline-flex items-center gap-1">
-                            <CheckCircle size={14} /> Réglé en totalité
+        {isLoading ? (
+          <div className="p-12 text-center">
+            <div className="inline-flex items-center gap-3 text-slate-400 text-sm">
+              <div className="w-4 h-4 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+              Chargement du registre…
+            </div>
+          </div>
+        ) : list.length === 0 ? (
+          <div className="p-16 text-center">
+            <ClipboardList className="mx-auto text-slate-200 mb-3" size={40} />
+            <p className="text-sm font-semibold text-slate-400">Aucune fiche de paiement</p>
+            <p className="text-xs text-slate-300 mt-1">
+              {isAdmin ? 'Créez une fiche via le bouton Nouvelle fiche.' : "Aucune gratification n2019est encore planifiée pour vous."}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {list.map((p) => {
+              const montantPaye = p.montantPaye ?? 0;
+              const reste = p.montant - montantPaye;
+              const statut = STATUT_CONFIG[p.statut] ?? STATUT_CONFIG.PLANIFIE;
+              const isExpanded = expandedId === p.id;
+              const nomStagiaire = p.stagiaire?.user
+                ? `${p.stagiaire.user.prenom} ${p.stagiaire.user.nom}`
+                : p.stagiaire?.nom ? `${p.stagiaire.prenom ?? ''} ${p.stagiaire.nom}`.trim() : '—';
+
+              return (
+                <div key={p.id} className="group">
+                  {/* LIGNE PRINCIPALE — cliquable pour expand */}
+                  <div
+                    className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50/80 cursor-pointer transition-colors select-none"
+                    onClick={() => setExpandedId(isExpanded ? null : p.id)}
+                  >
+                    {/* Indicateur statut */}
+                    <div
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ background: statut.color }}
+                    />
+
+                    {/* Stagiaire + dossier */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-800 truncate">{nomStagiaire}</span>
+                        {p.reference && (
+                          <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded truncate hidden sm:inline">
+                            {p.reference}
                           </span>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                      </div>
+                      <ProgressBar paye={montantPaye} total={p.montant} devise={p.devise} />
+                    </div>
+
+                    {/* Montant dû */}
+                    <div className="text-right shrink-0 hidden sm:block">
+                      <div className="text-xs text-slate-400 uppercase tracking-wider">Dû</div>
+                      <div className="text-sm font-black font-mono text-slate-700">{fmtMontant(p.montant, p.devise)}</div>
+                    </div>
+
+                    {/* Date limite */}
+                    <div className="text-right shrink-0 hidden md:block">
+                      <div className="text-xs text-slate-400 uppercase tracking-wider">Échéance</div>
+                      <div className="text-xs font-semibold text-slate-600">{fmtDate(p.datePrevue)}</div>
+                    </div>
+
+                    {/* Badge statut */}
+                    <div className="shrink-0">
+                      <span
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-full"
+                        style={{
+                          color: statut.color,
+                          background: `${statut.color}18`,
+                        }}
+                      >
+                        {statut.label}
+                      </span>
+                    </div>
+
+                    {/* Actions */}
+                    <div
+                      className="flex items-center gap-2 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {p.statut !== 'PAYE' && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setActivePaiement(p);
+                              setMontantTranche(reste > 0 ? reste.toString() : '');
+                              setShowTrancheModal(true);
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            <PlusCircle size={13} /> Verser
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => validerPaiementTotal(p.id)}
+                              className="text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors hidden sm:inline-flex items-center gap-1"
+                            >
+                              <CheckCircle size={13} /> Solder
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {p.statut === 'PAYE' && (
+                        <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                          <CheckCircle size={13} /> Soldé
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Chevron expand */}
+                    <div className="text-slate-300 group-hover:text-slate-500 transition-colors">
+                      {isExpanded
+                        ? <ChevronDown size={16} />
+                        : <ChevronRight size={16} />}
+                    </div>
+                  </div>
+
+                  {/* SECTION EXPANDABLE : historique des tranches */}
+                  {isExpanded && (
+                    <div className="bg-slate-50/50 border-t border-slate-100">
+                      <div className="px-6 pt-3 pb-1 flex items-center gap-2">
+                        <History size={12} className="text-slate-400" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Historique des versements
+                        </span>
+                        <span className="text-[10px] text-slate-300 ml-auto">
+                          {(p.tranches ?? []).length} versement{(p.tranches ?? []).length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <TrancheHistorique tranches={p.tranches ?? []} devise={p.devise} />
+                      {/* Récap mobile */}
+                      <div className="px-6 py-3 flex gap-4 text-xs text-slate-500 border-t border-slate-100 sm:hidden">
+                        <span>Dû : <strong className="font-mono">{fmtMontant(p.montant, p.devise)}</strong></span>
+                        <span>Versé : <strong className="font-mono text-emerald-600">{fmtMontant(montantPaye, p.devise)}</strong></span>
+                        <span>Reste : <strong className="font-mono text-amber-600">{fmtMontant(reste, p.devise)}</strong></span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* ─── MODALE : FORMULAIRE DE VERSEMENT DE TRANCHE ─────────────────────── */}
+      {/* ── MODALE VERSEMENT ─────────────────────────────────────────────────── */}
       {showTrancheModal && activePaiement && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl">
 
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <History className="text-indigo-600" size={20} />
-                {role === 'STAGIAIRE' ? 'Déclarer un versement' : 'Encaisser un versement'}
-              </h3>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center">
+                  <History size={16} className="text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">
+                    {role === 'STAGIAIRE' ? 'Déclarer un versement' : 'Encaisser un versement'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    {activePaiement.stagiaire?.user
+                      ? `${activePaiement.stagiaire.user.prenom} ${activePaiement.stagiaire.user.nom}`
+                      : 'Fiche de paiement'}
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => { setShowTrancheModal(false); setActivePaiement(null); }}
-                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+                onClick={fermerTrancheModal}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
 
-            <div className="my-4 p-3 bg-slate-50 rounded-2xl text-xs space-y-1.5 text-slate-600 border">
-              <div className="flex justify-between">
-                <span>Total attendu :</span>
-                <span className="font-bold text-slate-800">{fmtMontant(activePaiement.montant, activePaiement.devise)}</span>
+            {/* Récap fiche */}
+            <div className="mx-6 my-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Total dû</div>
+                  <div className="font-black font-mono text-slate-700">{fmtMontant(activePaiement.montant, activePaiement.devise)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Déjà versé</div>
+                  <div className="font-black font-mono text-emerald-600">{fmtMontant(activePaiement.montantPaye ?? 0, activePaiement.devise)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Reste</div>
+                  <div className="font-black font-mono text-indigo-600">
+                    {fmtMontant(activePaiement.montant - (activePaiement.montantPaye ?? 0), activePaiement.devise)}
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between text-emerald-600">
-                <span>Déjà réglé :</span>
-                <span className="font-bold">{fmtMontant(activePaiement.montantPaye ?? 0, activePaiement.devise)}</span>
-              </div>
-              <div className="flex justify-between border-t pt-1.5 font-semibold text-indigo-700">
-                <span>Reste à payer :</span>
-                <span>{fmtMontant(activePaiement.montant - (activePaiement.montantPaye ?? 0), activePaiement.devise)}</span>
-              </div>
+              <ProgressBar paye={activePaiement.montantPaye ?? 0} total={activePaiement.montant} devise={activePaiement.devise} />
             </div>
 
-            <form onSubmit={handleAjouterTranche} className="space-y-4">
+            <form onSubmit={handleAjouterTranche} className="px-6 pb-6 space-y-4">
+
+              {/* Méthode de paiement */}
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Montant de ce versement</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                  Méthode de paiement
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.entries(METHODE_CONFIG) as [MethodePaiement, typeof METHODE_CONFIG[MethodePaiement]][]).map(([key, m]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setMethodeTranche(key)}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                        methodeTranche === key
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <span style={{ color: methodeTranche === key ? m.color : '#9ca3af' }}>{m.icon}</span>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Montant */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                  Montant de ce versement
+                </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-sm">
-                    {activePaiement.devise || '$'}
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs font-bold">
+                    {activePaiement.devise || 'FCFA'}
                   </span>
                   <input
                     type="number"
                     step="any"
                     required
-                    className="w-full pl-8 pr-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
-                    placeholder="Ex: 50000"
+                    className="w-full pl-14 pr-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-sm font-bold"
+                    placeholder="Ex: 50 000"
                     value={montantTranche}
                     onChange={(e) => setMontantTranche(e.target.value)}
                   />
                 </div>
               </div>
 
+              {/* Téléphone si MOMO/ORANGE */}
+              {(methodeTranche === 'MOMO' || methodeTranche === 'ORANGE') && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                    Numéro payeur
+                  </label>
+                  <input
+                    type="tel"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                    placeholder="Ex: 6XX XXX XXX"
+                    value={telephoneTranche}
+                    onChange={(e) => setTelephoneTranche(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Référence */}
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                  {role === 'STAGIAIRE' ? 'Référence ou Numéro de transaction' : 'Méthode / ID de Transaction'}
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                  {role === 'STAGIAIRE' ? 'ID de transaction (optionnel)' : 'Référence / Note (optionnel)'}
                 </label>
                 <input
                   type="text"
-                  className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                  placeholder={role === 'STAGIAIRE' ? 'Ex: Mobile Money ID, virement bancaire' : 'Ex: Espèces, Chèque n°...'}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                  placeholder={role === 'STAGIAIRE' ? 'Ex: ID Mobile Money, N° reçu' : 'Ex: Chèque n°123, reçu caisse'}
                   value={referenceTranche}
                   onChange={(e) => setReferenceTranche(e.target.value)}
                 />
               </div>
 
+              {/* Alerte stagiaire */}
               {role === 'STAGIAIRE' && (
-                <div className="flex gap-2 p-3 bg-amber-50 rounded-2xl text-[11px] text-amber-700 leading-relaxed border border-amber-100">
-                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                  <p>Votre déclaration sera soumise à l'équipe comptable pour vérification avant d'être créditée sur votre solde.</p>
+                <div className="flex gap-2.5 p-3 bg-amber-50 rounded-xl text-[11px] text-amber-700 border border-amber-100">
+                  <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                  <span>Ce versement sera vérifié par l'équipe comptable avant d'être crédité sur votre solde.</span>
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
-                <Button
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
                   type="button"
-                  variant="secondary"
-                  className="flex-1 rounded-xl"
-                  onClick={() => { setShowTrancheModal(false); setActivePaiement(null); }}
+                  onClick={fermerTrancheModal}
+                  className="flex-1 py-3 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Annuler
-                </Button>
-                <Button
+                </button>
+                <button
                   type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl"
                   disabled={isSubmitting}
+                  className="flex-1 py-3 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-colors"
                 >
-                  {isSubmitting ? 'Traitement...' : role === 'STAGIAIRE' ? 'Déclarer' : 'Confirmer'}
-                </Button>
+                  {isSubmitting ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Traitement…
+                    </span>
+                  ) : role === 'STAGIAIRE' ? 'Soumettre le versement' : "Confirmer l\u2019encaissement"}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ─── MODALE : CRÉATION D'UNE NOUVELLE FICHE DE PAIEMENT (admin) ──────── */}
+      {/* ── MODALE CRÉATION ADMIN ────────────────────────────────────────────── */}
       {showCreationModal && isAdmin && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border animate-scaleUp">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md shadow-2xl">
 
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <UserPlus className="text-indigo-600" size={20} />
-                Nouvelle fiche de paiement
-              </h3>
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center">
+                  <UserPlus size={16} className="text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Nouvelle fiche de paiement</h3>
+                  <p className="text-[10px] text-slate-400">Planifier une gratification pour un stagiaire</p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowCreationModal(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleCreerPaiement} className="space-y-4 mt-4">
+            <form onSubmit={handleCreerPaiement} className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stagiaire</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Stagiaire</label>
                 <select
                   required
-                  className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={creation.stagiaireId}
                   onChange={(e) => setCreation({ ...creation, stagiaireId: e.target.value })}
                   disabled={loadingStagiaires}
                 >
                   <option value="">
-                    {loadingStagiaires ? 'Chargement des stagiaires...' : 'Sélectionner un stagiaire'}
+                    {loadingStagiaires ? 'Chargement…' : 'Sélectionner un stagiaire'}
                   </option>
                   {stagiaires.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.user ? `${s.user.prenom} ${s.user.nom}` : `${s.prenom ?? ''} ${s.nom ?? ''}`.trim() || s.id}
+                      {s.user
+                        ? `${s.user.prenom} ${s.user.nom}`
+                        : `${s.prenom ?? ''} ${s.nom ?? ''}`.trim() || s.id}
                     </option>
                   ))}
                 </select>
@@ -559,23 +761,22 @@ export default function Paiements() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Montant dû</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Montant dû</label>
                   <input
                     type="number"
                     step="any"
                     required
-                    className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
-                    placeholder="Ex: 150000"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm font-bold"
+                    placeholder="150 000"
                     value={creation.montant}
                     onChange={(e) => setCreation({ ...creation, montant: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Devise</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Devise</label>
                   <input
                     type="text"
-                    className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                    placeholder="FCFA"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                     value={creation.devise}
                     onChange={(e) => setCreation({ ...creation, devise: e.target.value })}
                   />
@@ -583,45 +784,49 @@ export default function Paiements() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
-                  <Calendar size={12} /> Date limite
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <Calendar size={11} /> Date limite d'encaissement
                 </label>
                 <input
                   type="date"
                   required
-                  className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   value={creation.datePrevue}
                   onChange={(e) => setCreation({ ...creation, datePrevue: e.target.value })}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Référence (optionnel)</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Libellé (optionnel)</label>
                 <input
                   type="text"
-                  className="w-full px-4 py-2.5 border rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                  placeholder="Ex: Gratification mois de Juin"
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  placeholder="Ex: Gratification mois de juin 2025"
                   value={creation.reference}
                   onChange={(e) => setCreation({ ...creation, reference: e.target.value })}
                 />
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <Button
+              <div className="flex gap-3 pt-1">
+                <button
                   type="button"
-                  variant="secondary"
-                  className="flex-1 rounded-xl"
                   onClick={() => setShowCreationModal(false)}
+                  className="flex-1 py-3 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Annuler
-                </Button>
-                <Button
+                </button>
+                <button
                   type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl"
                   disabled={isCreating}
+                  className="flex-1 py-3 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-colors"
                 >
-                  {isCreating ? 'Création...' : 'Créer la fiche'}
-                </Button>
+                  {isCreating ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Création…
+                    </span>
+                  ) : 'Créer la fiche'}
+                </button>
               </div>
             </form>
           </div>

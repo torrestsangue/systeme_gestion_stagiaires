@@ -33,10 +33,10 @@ function useBreakpoint() {
    DATA
 ───────────────────────────────────────── */
 const STATS = [
-  { value: '1 200+',   label: 'Stagiaires gérés' },
+  { value: '10+',   label: 'Stagiaires gérés' },
   { value: '98%',      label: 'Taux de satisfaction' },
-  { value: '50+',      label: 'Entreprises partenaires' },
-  { value: '0 fraude', label: 'Détectée avec QR dynamique' },
+  { value: '5+',      label: 'Entreprises partenaires' },
+  { value: '3 fraude', label: 'Détectée avec QR dynamique' },
 ];
 
 const STEPS = [
