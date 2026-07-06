@@ -102,6 +102,10 @@ export const paiementService = {
   changerStatut: (id: string, _statut?: 'PAYE') =>
     api.patch(`/paiements/${id}/solder`).then((r) => r.data),
 
+  // Valide une tranche en attente → PATCH /paiements/tranches/:id/valider
+  validerTranche: (id: string) =>
+    api.patch(`/paiements/tranches/${id}/valider`).then((r) => r.data),
+
   // Statistiques du dashboard financier
   stats: () => api.get('/paiements/dashboard/stats').then((r) => r.data),
 };

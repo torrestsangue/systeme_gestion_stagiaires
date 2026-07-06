@@ -1,9 +1,23 @@
 // pages/Dashboard.tsx — dynamic dashboard (fetch API for KPIs, presences and recent activities)
 import { useEffect, useState } from 'react';
-import { Users, CheckCircle2, AlertCircle, CreditCard, TrendingUp } from 'lucide-react';
+import { Users, CheckCircle2, AlertCircle, CreditCard, TrendingUp, LogIn, LogOut, Edit, Trash2, Plus, CheckSquare, Eye, Lock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 import { useAuthStore } from '../store/auth.store';
 import api from '../services/api';
+
+const getActivityIcon = (action: string) => {
+  if (action.includes('PAIEMENT')) return { icon: CreditCard, color: 'text-indigo-500', bg: 'bg-indigo-50' };
+  if (action.includes('USER')) return { icon: Users, color: 'text-purple-500', bg: 'bg-purple-50' };
+  if (action.includes('RAPPORT')) return { icon: Edit, color: 'text-blue-500', bg: 'bg-blue-50' };
+  if (action.includes('PRÉSENCE')) return { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-50' };
+  if (action.includes('TRANCHE')) return { icon: CheckSquare, color: 'text-cyan-500', bg: 'bg-cyan-50' };
+  if (action.includes('TACHE')) return { icon: Plus, color: 'text-orange-500', bg: 'bg-orange-50' };
+  if (action.includes('LOGIN')) return { icon: LogIn, color: 'text-green-500', bg: 'bg-green-50' };
+  if (action.includes('LOGOUT')) return { icon: LogOut, color: 'text-red-500', bg: 'bg-red-50' };
+  if (action.includes('DELETE') || action.includes('SUPPRIMER')) return { icon: Trash2, color: 'text-red-500', bg: 'bg-red-50' };
+  if (action.includes('CREATE')) return { icon: Plus, color: 'text-green-500', bg: 'bg-green-50' };
+  return { icon: Eye, color: 'text-slate-500', bg: 'bg-slate-50' };
+};
 
 const defaultWeek = [
   { jour: 'Lun', presents: 0 }, { jour: 'Mar', presents: 0 },
@@ -39,13 +53,11 @@ export default function Dashboard() {
     const fetchAll = async () => {
       setLoading(true); setError(null);
       try {
-        const [sRes, pRes, wRes, rRes, tRes, iRes] = await Promise.all([
+        const [sRes, pRes, wRes, auditRes] = await Promise.all([
           api.get('/stagiaires/stats'),
           api.get('/presences/jour'),
           api.get('/presences/semaine'),
-          api.get('/rapports?limit=6'),
-          api.get('/taches?limit=6'),
-          api.get('/inscriptions?limit=6'),
+          api.get('/users/audit', { params: { limit: 8 } }),
         ]);
 
         setStats(sRes.data ?? {});
@@ -59,28 +71,15 @@ export default function Dashboard() {
         const weekArr = Array.isArray(week) ? week : defaultWeek;
         setWeekData(weekArr.map((d: any) => ({ jour: d.jour, presents: d.presents })));
 
-        const rapportsRaw = Array.isArray(rRes.data?.items) ? rRes.data.items : (Array.isArray(rRes.data) ? rRes.data : []);
-        const rapports = (rapportsRaw).map((x: any) => ({
-          type: 'rapport', who: x.auteur?.prenom ? `${x.auteur.prenom} ${x.auteur.nom ?? ''}`.trim() : x.titre ?? 'Rapport',
-          what: x.titre ?? 'Rapport soumis', at: x.createdAt ?? x.date ?? x.updatedAt ?? null,
-        }));
-        const tachesRaw = Array.isArray(tRes.data?.items) ? tRes.data.items : (Array.isArray(tRes.data) ? tRes.data : []);
-        const taches = (tachesRaw).map((x: any) => ({
-          type: 'tache', who: x.assignedTo?.prenom ? `${x.assignedTo.prenom} ${x.assignedTo.nom ?? ''}`.trim() : x.titre ?? 'Tâche',
-          what: x.titre ?? 'Tâche mise à jour', at: x.createdAt ?? x.updatedAt ?? null,
-        }));
-        const inscRaw = Array.isArray(iRes.data?.items) ? iRes.data.items : (Array.isArray(iRes.data) ? iRes.data : []);
-        const insc = (inscRaw).map((x: any) => ({
-          type: 'inscription', who: x.nom ? `${x.prenom ?? ''} ${x.nom}`.trim() : 'Nouvelle inscription',
-          what: 'Inscription reçue', at: x.createdAt ?? x.date ?? null,
+        const logsRaw = Array.isArray(auditRes.data?.logs) ? auditRes.data.logs : (Array.isArray(auditRes.data) ? auditRes.data : []);
+        const activitiesFromLogs = logsRaw.map((log: any) => ({
+          type: 'audit',
+          user: log.user ? `${log.user.prenom ?? ''} ${log.user.nom ?? ''}`.trim() : 'Système',
+          action: String(log.action).replace(/_/g, ' '),
+          at: log.createdAt,
         }));
 
-        const merged = [...rapports, ...taches, ...insc]
-          .filter(a => a.at)
-          .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-          .slice(0, 6);
-
-        setActivities(merged);
+        setActivities(activitiesFromLogs);
       } catch (err: any) {
         console.error('Dashboard fetch error', err);
         setError(err?.response?.data?.error || err.message || 'Erreur lors du chargement');
@@ -126,20 +125,31 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h2 className="font-semibold text-slate-900 mb-4">Activité récente</h2>
-          <ul className="space-y-3 text-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="font-bold text-slate-900 text-lg">📋 Activité récente</h2>
+            <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2.5 py-1 rounded-full">Temps réel</span>
+          </div>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
             {(activities.length ? activities : [
-              { who: 'Aucun', what: 'Pas d’activité récente', at: null }
-            ]).map((act: any, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-700 grid place-items-center text-xs font-semibold flex-shrink-0">{(act.who || '?')[0]}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-slate-900"><span className="font-medium">{act.who}</span> <span className="text-slate-500">{act.what}</span></div>
-                  <div className="text-xs text-slate-400">{act.at ? new Date(act.at).toLocaleString('fr-FR') : ''}</div>
+              { user: 'Aucune activité', action: '', at: null }
+            ]).map((act: any, i: number) => {
+              const { icon: Icon, color, bg } = getActivityIcon(act.action);
+              return (
+                <div key={i} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition-all duration-200 group">
+                  <div className={`w-10 h-10 rounded-lg ${bg} flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform`}>
+                    <Icon className={`w-5 h-5 ${color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-semibold text-slate-900 truncate">{act.user}</span>
+                      <span className="text-xs text-slate-600 uppercase tracking-wide truncate">{act.action}</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-medium text-slate-400 ml-auto flex-shrink-0">{act.at ? new Date(act.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                 </div>
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

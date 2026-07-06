@@ -170,7 +170,7 @@ export default function Inscriptions() {
           <table className="w-full border-collapse text-left">
             <thead className="bg-slate-50/70 border-b border-slate-100">
               <tr className="text-xs uppercase text-slate-500 font-semibold tracking-wider">
-                <th className="p-4">Candidat</th>
+                <th className="p-4">Candidature</th>
                 <th className="p-4">Domaine</th>
                 <th className="p-4">N° Dossier</th>
                 <th className="p-4">Date de dépôt</th>
@@ -195,16 +195,26 @@ export default function Inscriptions() {
                 filtered.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="p-4">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
                           {item.prenom?.charAt(0).toUpperCase()}
                           {item.nom?.charAt(0).toUpperCase()}
                         </div>
-                        <div>
+                        <div className="space-y-2">
                           <div className="font-semibold text-slate-800">
                             {item.prenom} {item.nom}
                           </div>
                           <div className="text-xs text-slate-400">{item.email}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {item.status === 'RECUE' && (
+                              <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                                Nouvelle candidature
+                              </span>
+                            )}
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">
+                              Dossier {item.numeroDossier || 'N/A'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </td>

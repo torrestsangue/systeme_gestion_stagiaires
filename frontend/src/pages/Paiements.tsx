@@ -72,7 +72,7 @@ function ProgressBar({ paye, total, devise }: { paye: number; total: number; dev
 }
 
 // ─── SOUS-COMPOSANT : HISTORIQUE DES TRANCHES ────────────────────────────────
-function TrancheHistorique({ tranches, devise }: { tranches: any[]; devise?: string }) {
+function TrancheHistorique({ tranches, devise, canValidate, onValidate, validatingTrancheId }: { tranches: any[]; devise?: string; canValidate?: boolean; onValidate?: (id: string) => void; validatingTrancheId?: string | null }) {
   if (!tranches?.length) {
     return (
       <div className="py-4 text-center text-xs text-slate-400">
@@ -88,23 +88,37 @@ function TrancheHistorique({ tranches, devise }: { tranches: any[]; devise?: str
           : t.statut === 'EN_ATTENTE' ? 'text-amber-600 bg-amber-50'
           : 'text-red-500 bg-red-50';
         return (
-          <div key={t.id ?? i} className="flex items-center gap-3 py-2.5 px-4">
-            <span className="text-slate-300" style={{ color: methode.color }}>{methode.icon}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-700 font-mono">
-                  {fmtMontant(t.montant, devise)}
-                </span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statutColor}`}>
-                  {t.statut === 'REUSSIT' ? 'Validé' : t.statut === 'EN_ATTENTE' ? 'En attente' : 'Échoué'}
-                </span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                {methode.label}{t.reference ? ` · ${t.reference}` : ''}
-                {t.telephonePayeur ? ` · ${t.telephonePayeur}` : ''}
+          <div key={t.id ?? i} className="flex flex-col gap-3 py-2.5 px-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-slate-300" style={{ color: methode.color }}>{methode.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700 font-mono">
+                    {fmtMontant(t.montant, devise)}
+                  </span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statutColor}`}>
+                    {t.statut === 'REUSSIT' ? 'Validé' : t.statut === 'EN_ATTENTE' ? 'En attente' : 'Échoué'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  {methode.label}{t.reference ? ` · ${t.reference}` : ''}
+                  {t.telephonePayeur ? ` · ${t.telephonePayeur}` : ''}
+                </div>
               </div>
             </div>
-            <span className="text-[10px] text-slate-400 shrink-0">{fmtDate(t.createdAt)}</span>
+            <div className="flex items-center gap-2 justify-between sm:justify-end">
+              <span className="text-[10px] text-slate-400 shrink-0">{fmtDate(t.createdAt)}</span>
+              {canValidate && t.statut === 'EN_ATTENTE' && onValidate && (
+                <button
+                  type="button"
+                  disabled={validatingTrancheId === t.id}
+                  onClick={() => onValidate(t.id)}
+                  className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-full transition-colors"
+                >
+                  {validatingTrancheId === t.id ? 'Validation...' : 'Valider'}
+                </button>
+              )}
+            </div>
           </div>
         );
       })}
@@ -117,6 +131,7 @@ export default function Paiements() {
   const user = useAuthStore((s) => s.user);
   const role = user?.role;
   const isAdmin = role !== 'STAGIAIRE';
+  const canValidateTranches = role === 'SUPER_ADMIN' || role === 'ADMIN_RH';
 
   const [list, setList]           = useState<any[]>([]);
   const [stats, setStats]         = useState<any>({});
@@ -135,6 +150,7 @@ export default function Paiements() {
   const [methodeTranche, setMethodeTranche]       = useState<MethodePaiement>('MOMO');
   const [telephoneTranche, setTelephoneTranche]   = useState('');
   const [isSubmitting, setIsSubmitting]           = useState(false);
+  const [validatingTrancheId, setValidatingTrancheId] = useState<string | null>(null);
 
   // Modal création (admin)
   const [showCreationModal, setShowCreationModal] = useState(false);
@@ -249,6 +265,19 @@ export default function Paiements() {
       reload();
     } catch {
       toast.error('Erreur lors de la validation.');
+    }
+  };
+
+  const validerTranche = async (trancheId: string) => {
+    setValidatingTrancheId(trancheId);
+    try {
+      await paiementService.validerTranche(trancheId);
+      toast.success('Tranche validée avec succès.');
+      reload();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error ?? 'Erreur lors de la validation de la tranche.');
+    } finally {
+      setValidatingTrancheId(null);
     }
   };
 
@@ -534,7 +563,13 @@ export default function Paiements() {
                           {(p.tranches ?? []).length} versement{(p.tranches ?? []).length !== 1 ? 's' : ''}
                         </span>
                       </div>
-                      <TrancheHistorique tranches={p.tranches ?? []} devise={p.devise} />
+                      <TrancheHistorique
+                        tranches={p.tranches ?? []}
+                        devise={p.devise}
+                        canValidate={canValidateTranches}
+                        validatingTrancheId={validatingTrancheId}
+                        onValidate={validerTranche}
+                      />
                       {/* Récap mobile */}
                       <div className="px-6 py-3 flex gap-4 text-xs text-slate-500 border-t border-slate-100 sm:hidden">
                         <span>Dû : <strong className="font-mono">{fmtMontant(p.montant, p.devise)}</strong></span>
