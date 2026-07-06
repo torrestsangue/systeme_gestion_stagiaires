@@ -2,7 +2,7 @@ import { Router } from "express";
 import { AuthController } from "../controllers/auth.controller";
 import { usercontroller } from "../controllers/users.controllers"; // Gère l'auth de base (Create, Verify...)
 import { InscriptionController } from "../controllers/inscription.controller";
-import { authenticate } from "../middlewares/auth.middleware";
+import { authenticate, onlyAdmins } from "../middlewares/auth.middleware";
 import { upload } from "../middlewares/upload";
 import { UserController } from "../controllers/user.controller"; // Gère la liste et l'administration des users
 import { stagiaireController } from "../controllers/stagiaire.controller";
@@ -123,10 +123,11 @@ authRouter.delete('/rapports/:id',     authenticate, RapportController.delete);
  */
 authRouter.get('/paiements',                  authenticate, PaiementController.list);
 authRouter.post('/paiements',                 authenticate, PaiementController.create);
-authRouter.post('/paiements/:id/tranches',    authenticate, PaiementController.ajouterTranche);
-authRouter.patch('/paiements/:id/solder',     authenticate, PaiementController.solderPaiement);
-authRouter.delete('/paiements/:id',           authenticate, PaiementController.delete);
-authRouter.get('/paiements/dashboard/stats',  authenticate, PaiementController.dashboard);
+authRouter.post('/paiements/:id/tranches',        authenticate, PaiementController.ajouterTranche);
+authRouter.patch('/paiements/tranches/:id/valider', authenticate, onlyAdmins, PaiementController.validerTranche);
+authRouter.patch('/paiements/:id/solder',           authenticate, PaiementController.solderPaiement);
+authRouter.delete('/paiements/:id',                 authenticate, PaiementController.delete);
+authRouter.get('/paiements/dashboard/stats',        authenticate, PaiementController.dashboard);
 
 /**
  * ─── PRÉSENCES (QR CODES) ──────────────────────────────────────────────────

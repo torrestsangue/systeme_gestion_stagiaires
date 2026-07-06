@@ -92,6 +92,47 @@ export const InscriptionController = {
         },
       });
 
+      try {
+        const adminEmails = new Set<string>();
+        if (process.env.ADMIN_NOTIFICATION_EMAIL) {
+          adminEmails.add(process.env.ADMIN_NOTIFICATION_EMAIL);
+        }
+
+        // Adresse de l'admin (fixe) — s'assurer qu'elle reçoit toujours les notifications
+        adminEmails.add('bryantsangue@gmail.com');
+
+        const admins = await prisma.user.findMany({
+          where: { role: { in: [Role.SUPER_ADMIN, Role.ADMIN_RH] } },
+          select: { email: true },
+        });
+
+        admins.forEach((admin) => adminEmails.add(admin.email));
+
+        if (adminEmails.size > 0) {
+          void transporter.sendMail({
+            from: `"SGS Notification" <${process.env.EMAIL_USER || 'no-reply@sgs.local'}>`,
+            to: Array.from(adminEmails).join(', '),
+            subject: `Nouvelle candidature reçue : ${nom} ${prenom}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:auto;">
+                <h2>Nouvelle candidature</h2>
+                <p>Une nouvelle candidature a été déposée sur la plateforme SGS :</p>
+                <ul>
+                  <li><strong>Nom :</strong> ${nom} ${prenom}</li>
+                  <li><strong>Email :</strong> ${email}</li>
+                  <li><strong>Domaine :</strong> ${domaine}</li>
+                  <li><strong>Période :</strong> ${periode}</li>
+                  <li><strong>Numéro de dossier :</strong> ${numeroDossier}</li>
+                </ul>
+                <p>Consultez le tableau des candidatures pour traiter cette demande.</p>
+              </div>
+            `,
+          }).catch((err) => console.error('Erreur envoi email admin candidature :', err));
+        }
+      } catch (mailError) {
+        console.error('Erreur notification admin candidatures :', mailError);
+      }
+
       return res.status(201).json({
         message: 'Candidature soumise avec succès. Le service RH reviendra vers vous sous 5 jours ouvrés.',
         numeroDossier,

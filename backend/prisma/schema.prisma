@@ -1,3 +1,24 @@
+/// Enum des rôles utilisateur disponibles dans le système.
+/// Enum des statuts possibles pour une inscription.
+/// Enum des statuts possibles pour une tâche.
+/// Enum des niveaux de priorité pour une tâche.
+/// Enum des statuts possibles de présence.
+/// Enum des statuts de paiement.
+/// Enum des méthodes de paiement pour une tranche.
+/// Enum des statuts possibles pour une tranche de paiement.
+
+/// Modèle représentant un utilisateur du système avec ses informations d’authentification, rôle, statut, relations vers stagiaire, tâches créées, rapports validés, évaluations et logs d’audit.
+/// Modèle représentant un stagiaire lié à un utilisateur, avec les données de dossier, période de stage, tuteur, liens vers tâches, rapports, présences, paiements et évaluation.
+/// Modèle représentant une inscription de stagiaire, avec ses informations personnelles, domaine, période, statut de traitement et commentaires.
+/// Modèle représentant une tâche assignée à un stagiaire, créée par un utilisateur, avec statut, priorité, échéance et dates de création/mise à jour.
+/// Modèle représentant un rapport de stagiaire, pouvant être validé par un utilisateur, avec activités, difficultés, apprentissages et commentaires.
+/// Modèle représentant une session de pointage par jeton, avec expiration et présences associées.
+/// Modèle représentant une présence de stagiaire, liée à une session optionnelle, avec statut, données IP et géolocalisation.
+/// Modèle représentant un paiement prévu par un stagiaire, avec montant, devise, statut, dates prévues et réelles, références et tranches associées.
+/// Modèle représentant une tranche de paiement, liée à un paiement principal, avec montant, méthode, statut et métadonnées de transaction.
+/// Modèle représentant l’évaluation finale d’un stagiaire par un évaluateur, avec notes par critère, note finale, mention, attestation et commentaires.
+/// Modèle représentant un journal d’audit des actions utilisateur, avec cible, détails, adresse IP et date.
+
 generator client {
   provider = "prisma-client-js"
 }

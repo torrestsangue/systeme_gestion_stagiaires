@@ -112,7 +112,7 @@ export const PaiementController = {
   // L'id dans req.params est l'UUID String du paiement parent.
   ajouterTranche: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;            // UUID String — corrigé (plus de Number())
+      const id = req.params.id as string;   // UUID String — forcé string
       const { montant, methode, reference, telephone } = req.body;
       const user = (req as any).user;
 
@@ -123,13 +123,13 @@ export const PaiementController = {
       const paiement = await prisma.paiement.findUnique({
         where: { id },                      // String UUID direct
         include: { tranches: true },
-      });
+      }) as any;
       if (!paiement) return res.status(404).json({ error: 'Fiche de paiement introuvable.' });
 
       // Calcul du reste à payer
       const totalDejaPaye = paiement.tranches
-        .filter((t) => t.statut === TrancheStatut.REUSSIT)
-        .reduce((sum, t) => sum + t.montant, 0);
+        .filter((t: any) => t.statut === TrancheStatut.REUSSIT)
+        .reduce((sum: number, t: any) => sum + t.montant, 0);
       const resteAPayer = paiement.montant - totalDejaPaye;
 
       if (Number(montant) > resteAPayer + 0.01) {
@@ -192,19 +192,94 @@ export const PaiementController = {
     }
   },
 
-  // ─── 4. SOLDER UN PAIEMENT EN TOTALITÉ (PATCH /paiements/:id/solder) ──────
+  // ─── 4. VALIDER UNE TRANCHE (PATCH /paiements/tranches/:id/valider) ───────
+  validerTranche: async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const userId = (req as any).user?.id;
+
+      const tranche = await prisma.tranchePaiement.findUnique({
+        where: { id },
+        include: { paiement: { include: { tranches: true } } },
+      }) as any;
+      if (!tranche) return res.status(404).json({ error: 'Tranche introuvable.' });
+      if (tranche.statut === TrancheStatut.REUSSIT) {
+        return res.status(400).json({ error: 'Cette tranche est déjà validée.' });
+      }
+
+      const updatedTranche = await prisma.tranchePaiement.update({
+        where: { id },
+        data: { statut: TrancheStatut.REUSSIT },
+      });
+
+      const paiement = await prisma.paiement.findUnique({
+        where: { id: tranche.paiementId },
+        include: { tranches: true },
+      }) as any;
+
+      if (paiement) {
+        const totalPaye = paiement.tranches
+          .filter((t: any) => t.statut === TrancheStatut.REUSSIT || t.id === id)
+          .reduce((sum: number, t: any) => sum + t.montant, 0);
+        const nouveauStatut = totalPaye >= paiement.montant ? PaiementStatut.PAYE : PaiementStatut.PARTIEL;
+
+        await prisma.paiement.update({
+          where: { id: paiement.id },
+          data: {
+            statut:       nouveauStatut,
+            datePaiement: nouveauStatut === PaiementStatut.PAYE ? new Date() : null,
+          },
+        });
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'PAIEMENT_TRANCHE_VALIDEE',
+          cible: 'TranchePaiement',
+          details: `Tranche ${id} validée manuellement par l'admin`,
+          ip: req.ip,
+        },
+      });
+
+      return res.json({ message: 'Tranche validée.', tranche: updatedTranche });
+    } catch (error) {
+      console.error('PaiementController.validerTranche:', error);
+      return res.status(500).json({ error: 'Erreur lors de la validation de la tranche.' });
+    }
+  },
+
+  // ─── 5. SOLDER UN PAIEMENT EN TOTALITÉ (PATCH /paiements/:id/solder) ──────
   // Correspond à paiementService.changerStatut(id, 'PAYE') côté frontend.
   // Réservé aux admins — le middleware de route doit vérifier le rôle si besoin.
   solderPaiement: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;            // UUID String
+      const id = req.params.id as string;            // UUID String
       const userId = (req as any).user?.id;
 
-      const paiement = await prisma.paiement.findUnique({ where: { id } });
+      const paiement = await prisma.paiement.findUnique({ where: { id }, include: { tranches: true } }) as any;
       if (!paiement) return res.status(404).json({ error: 'Paiement introuvable.' });
 
       if (paiement.statut === PaiementStatut.PAYE) {
         return res.status(400).json({ error: 'Ce paiement est déjà soldé.' });
+      }
+
+      // Si des tranches existent déjà, calculer le reste à payer et créer
+      // une tranche REUSSIT pour matérialiser le règlement complet.
+      const totalDejaPaye = (paiement.tranches ?? [])
+        .filter((t: any) => t.statut === TrancheStatut.REUSSIT)
+        .reduce((s: number, t: any) => s + t.montant, 0);
+      const reste = Math.max(0, paiement.montant - totalDejaPaye);
+
+      if (reste > 0) {
+        await prisma.tranchePaiement.create({
+          data: {
+            paiementId: id,
+            montant: reste,
+            methode: PaymentMethod.CASH,
+            statut: TrancheStatut.REUSSIT,
+          },
+        });
       }
 
       const updated = await prisma.paiement.update({
@@ -239,7 +314,7 @@ export const PaiementController = {
   // ─── 5. SUPPRIMER UN PAIEMENT (admin) ────────────────────────────────────
   delete: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const paiement = await prisma.paiement.findUnique({ where: { id } });
       if (!paiement) return res.status(404).json({ error: 'Paiement introuvable.' });
       if (paiement.statut === PaiementStatut.PAYE) {
