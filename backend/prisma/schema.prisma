@@ -18,7 +18,7 @@
 /// Modèle représentant une tranche de paiement, liée à un paiement principal, avec montant, méthode, statut et métadonnées de transaction.
 /// Modèle représentant l’évaluation finale d’un stagiaire par un évaluateur, avec notes par critère, note finale, mention, attestation et commentaires.
 /// Modèle représentant un journal d’audit des actions utilisateur, avec cible, détails, adresse IP et date.
-
+///postgresql://sgs_db_15ba_user:gZGNs1hJOpnfwEEGABLJ8z0B7mYzEMKl@dpg-d96f51cvikkc73bptj80-a/sgs_db_15ba
 generator client {
   provider = "prisma-client-js"
 }
