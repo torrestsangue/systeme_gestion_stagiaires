@@ -4,8 +4,10 @@ import api from './api';
 export const inscriptionService = {
   create: (data: any) => api.post('/inscriptions', data).then((r) => r.data),
   list: () => api.get('/inscriptions').then((r) => r.data),
-  valider: (id: string, status: string, commentaire?: string) =>
-    api.patch(`/inscriptions/${id}/status`, { status, commentaire }).then((r) => r.data),
+  valider: (
+    id: string,
+    payload: { status: string; commentaire?: string; password?: string }
+  ) => api.patch(`/inscriptions/${id}/status`, payload).then((r) => r.data),
   uploadFile: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);

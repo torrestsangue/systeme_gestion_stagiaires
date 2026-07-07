@@ -9,6 +9,7 @@ import {
   Check,
   X
 } from 'lucide-react';
+// import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { inscriptionService } from '../services/sgs.service';
@@ -36,6 +37,9 @@ export default function Inscriptions() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'accept' | 'reject' | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<any | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -55,49 +59,35 @@ export default function Inscriptions() {
     reload();
   }, [reload]);
 
-  const handleValider = async (id: string, status: 'ACCEPTEE' | 'REFUSEE') => {
-    if (status === 'REFUSEE' && !window.confirm('Êtes-vous sûr de vouloir refuser cette candidature ?')) {
-      return;
-    }
+  // Ouvrir la modale (accept/reject) et sélectionner le candidat
+  const openModalFor = (mode: 'accept' | 'reject', candidate: any) => {
+    setSelectedCandidate(candidate);
+    setModalMode(mode);
+    setModalOpen(true);
+  };
 
-    let passwordToSend = undefined;
-
-    // Si la candidature est acceptée, on gère le mot de passe dynamique
-    if (status === 'ACCEPTEE') {
-      const choix = window.confirm(
-        "Voulez-vous générer automatiquement le mot de passe ? \n\n(Cliquez sur 'Annuler' pour saisir un mot de passe personnalisé)"
-      );
-
-      if (choix) {
-        passwordToSend = generateRandomPassword();
-      } else {
-        const customPassword = window.prompt("Veuillez saisir le mot de passe pour ce stagiaire :");
-        if (customPassword === null) return; // L'utilisateur a annulé l'action complète
-        if (!customPassword.trim()) {
-          toast.error("Le mot de passe ne peut pas être vide.");
-          return;
-        }
-        passwordToSend = customPassword.trim();
-      }
-    }
-
+  // Confirmation depuis la modale
+  const handleConfirmFromModal = async (payload: { password?: string; comment?: string }) => {
+    if (!selectedCandidate || !modalMode) return;
+    const id = selectedCandidate.id;
+    const status = modalMode === 'accept' ? 'ACCEPTEE' : 'REFUSEE';
     try {
       setUpdatingId(id);
-      
-      // On passe le mot de passe dynamique en second paramètre (ou dans un objet selon votre API)
-      await inscriptionService.valider(id, status, passwordToSend);
-      
-      if (status === 'ACCEPTEE') {
-        toast.success(`Candidature acceptée ! Mot de passe envoyé : ${passwordToSend}`);
-      } else {
-        toast.success('Candidature refusée.');
-      }
-      
+      await inscriptionService.valider(id, {
+        status,
+        password: payload.password,
+        commentaire: payload.comment,
+      });
+      toast.success(modalMode === 'accept' ? `Candidature acceptée !` : 'Candidature refusée.');
+      setModalOpen(false);
       await reload();
-    } catch (error) {
-      toast.error('Erreur lors de la mise à jour du statut.');
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la mise à jour du statut.");
     } finally {
       setUpdatingId(null);
+      setSelectedCandidate(null);
+      setModalMode(null);
     }
   };
 
@@ -165,75 +155,104 @@ export default function Inscriptions() {
       </div>
 
       {/* TABLEAU */}
-      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
-            <thead className="bg-slate-50/70 border-b border-slate-100">
-              <tr className="text-xs uppercase text-slate-500 font-semibold tracking-wider">
+          <table className="min-w-full table-auto text-left">
+            <thead className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-slate-200">
+              <tr className="text-xs uppercase font-semibold tracking-[0.18em]">
                 <th className="p-4">Candidature</th>
                 <th className="p-4">Domaine</th>
-                <th className="p-4">N° Dossier</th>
-                <th className="p-4">Date de dépôt</th>
+                <th className="p-4">Fichiers</th>
+                <th className="p-4 hidden lg:table-cell">N° dossier</th>
+                <th className="p-4 hidden sm:table-cell">Date</th>
                 <th className="p-4">Statut</th>
-                <th className="p-4 text-center">Actions d'arbitrage</th>
+                <th className="p-4 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-sm text-slate-600">
+            <tbody className="divide-y divide-slate-100 text-sm text-slate-600 bg-slate-50">
               {loading && list.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-slate-400 font-medium">
+                  <td colSpan={7} className="p-12 text-center text-slate-500 font-medium">
                     Chargement des candidatures...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-slate-400">
+                  <td colSpan={7} className="p-12 text-center text-slate-500">
                     Aucune candidature ne correspond à votre recherche.
                   </td>
                 </tr>
               ) : (
                 filtered.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                  <tr key={item.id} className="hover:bg-white transition-colors duration-200">
                     <td className="p-4">
                       <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 to-cyan-500 text-white flex items-center justify-center font-semibold text-sm shadow-lg shadow-slate-200/40">
                           {item.prenom?.charAt(0).toUpperCase()}
                           {item.nom?.charAt(0).toUpperCase()}
                         </div>
-                        <div className="space-y-2">
-                          <div className="font-semibold text-slate-800">
-                            {item.prenom} {item.nom}
-                          </div>
-                          <div className="text-xs text-slate-400">{item.email}</div>
-                          <div className="flex flex-wrap gap-2">
-                            {item.status === 'RECUE' && (
-                              <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                                Nouvelle candidature
-                              </span>
-                            )}
-                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-slate-900">{item.prenom} {item.nom}</p>
+                          <p className="text-xs text-slate-500">{item.email}</p>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-600">
                               Dossier {item.numeroDossier || 'N/A'}
                             </span>
+                            {item.status === 'RECUE' && (
+                              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] font-semibold text-amber-700">
+                                Nouvelle
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 font-medium text-slate-700">{item.domaine}</td>
-                    <td className="p-4 font-mono text-xs text-slate-500">{item.numeroDossier || 'N/A'}</td>
-                    <td className="p-4 text-slate-500">{fmtDate(item.createdAt)}</td>
-                    <td className="p-4">
+                    <td className="p-4 align-top">
+                      <div className="font-semibold text-slate-800">{item.domaine}</div>
+                    </td>
+                    <td className="p-4 align-top">
+                      <div className="flex flex-col gap-2">
+                        {item.cvUrl ? (
+                          <a
+                            href={item.cvUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition"
+                          >
+                            CV
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-400">Aucun CV</span>
+                        )}
+                        {item.motivationUrl ? (
+                          <a
+                            href={item.motivationUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition"
+                          >
+                            Lettre
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-400">Aucune lettre</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4 font-mono text-xs text-slate-500 align-top">{item.numeroDossier || 'N/A'}</td>
+                    <td className="p-4 hidden sm:table-cell text-slate-500 align-top">{fmtDate(item.createdAt)}</td>
+                    <td className="p-4 align-top">
                       <Badge tone={tone[item.status] || 'info'}>
                         {item.status}
                       </Badge>
                     </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
+                    <td className="p-4 text-center align-top">
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
                         <Button
                           size="sm"
                           variant={item.status === 'ACCEPTEE' ? 'secondary' : 'primary'}
                           disabled={item.status === 'ACCEPTEE' || updatingId !== null}
                           isLoading={updatingId === item.id}
-                          onClick={() => handleValider(item.id, 'ACCEPTEE')}
+                          onClick={() => openModalFor('accept', item)}
                           className="flex items-center gap-1.5 px-3 py-1.5"
                         >
                           <Check size={14} />
@@ -244,7 +263,7 @@ export default function Inscriptions() {
                           variant="danger"
                           disabled={item.status === 'REFUSEE' || updatingId !== null}
                           isLoading={updatingId === item.id}
-                          onClick={() => handleValider(item.id, 'REFUSEE')}
+                          onClick={() => openModalFor('reject', item)}
                           className="flex items-center gap-1.5 px-3 py-1.5 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 shadow-none"
                         >
                           <X size={14} />
@@ -259,6 +278,14 @@ export default function Inscriptions() {
           </table>
         </div>
       </div>
+
+      <ConfirmModal
+        open={modalOpen}
+        mode={modalMode}
+        candidateName={selectedCandidate ? `${selectedCandidate.prenom} ${selectedCandidate.nom}` : ''}
+        onClose={() => setModalOpen(false)}
+        onConfirm={handleConfirmFromModal}
+      />
     </div>
   );
 }
