@@ -1,32 +1,198 @@
-/// Enum des rôles utilisateur disponibles dans le système.
-/// Enum des statuts possibles pour une inscription.
-/// Enum des statuts possibles pour une tâche.
-/// Enum des niveaux de priorité pour une tâche.
-/// Enum des statuts possibles de présence.
-/// Enum des statuts de paiement.
-/// Enum des méthodes de paiement pour une tranche.
-/// Enum des statuts possibles pour une tranche de paiement.
-
-/// Modèle représentant un utilisateur du système avec ses informations d’authentification, rôle, statut, relations vers stagiaire, tâches créées, rapports validés, évaluations et logs d’audit.
-/// Modèle représentant un stagiaire lié à un utilisateur, avec les données de dossier, période de stage, tuteur, liens vers tâches, rapports, présences, paiements et évaluation.
-/// Modèle représentant une inscription de stagiaire, avec ses informations personnelles, domaine, période, statut de traitement et commentaires.
-/// Modèle représentant une tâche assignée à un stagiaire, créée par un utilisateur, avec statut, priorité, échéance et dates de création/mise à jour.
-/// Modèle représentant un rapport de stagiaire, pouvant être validé par un utilisateur, avec activités, difficultés, apprentissages et commentaires.
-/// Modèle représentant une session de pointage par jeton, avec expiration et présences associées.
-/// Modèle représentant une présence de stagiaire, liée à une session optionnelle, avec statut, données IP et géolocalisation.
-/// Modèle représentant un paiement prévu par un stagiaire, avec montant, devise, statut, dates prévues et réelles, références et tranches associées.
-/// Modèle représentant une tranche de paiement, liée à un paiement principal, avec montant, méthode, statut et métadonnées de transaction.
-/// Modèle représentant l’évaluation finale d’un stagiaire par un évaluateur, avec notes par critère, note finale, mention, attestation et commentaires.
-/// Modèle représentant un journal d’audit des actions utilisateur, avec cible, détails, adresse IP et date.
-///postgresql://sgs_db_15ba_user:gZGNs1hJOpnfwEEGABLJ8z0B7mYzEMKl@dpg-d96f51cvikkc73bptj80-a/sgs_db_15ba
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String       @id @default(uuid())
+  email            String       @unique
+  password         String
+  nom              String
+  prenom           String
+  telephone        String?
+  role             Role         @default(STAGIAIRE)
+  actif            Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  codeExpiresAt    DateTime?
+  company          String?
+  is_verify        Boolean      @default(false)
+  refreshToken     String?      @db.Text
+  verificationCode String?
+  photoUrl         String?
+  auditLogs        AuditLog[]
+  evaluations      Evaluation[] @relation("Evaluator")
+  rapportsValides  Rapport[]    @relation("RapportValidator")
+  stagiaire        Stagiaire?
+  tachesCreees     Tache[]      @relation("TacheCreator")
+}
+
+model Stagiaire {
+  id            String      @id @default(uuid())
+  userId        String      @unique
+  numeroDossier String      @unique
+  domaine       String
+  dateDebut     DateTime
+  dateFin       DateTime
+  tuteurId      String?
+  cvUrl         String?
+  motivationUrl String?
+  photoUrl      String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  evaluation    Evaluation?
+  paiements     Paiement[]
+  presences     Presence[]
+  rapports      Rapport[]
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taches        Tache[]
+}
+
+model Inscription {
+  id            String            @id @default(uuid())
+  numeroDossier String            @unique
+  nom           String
+  prenom        String
+  email         String
+  telephone     String?
+  domaine       String
+  periode       String
+  cvUrl         String?
+  motivationUrl String?
+  status        InscriptionStatus @default(RECUE)
+  commentaire   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model Tache {
+  id          String        @id @default(uuid())
+  titre       String
+  description String?
+  statut      TacheStatut   @default(A_FAIRE)
+  priorite    PriorityLevel @default(MOYENNE)
+  deadline    DateTime?
+  stagiaireId String
+  createurId  String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  createur    User          @relation("TacheCreator", fields: [createurId], references: [id])
+  stagiaire   Stagiaire     @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+
+  @@index([createurId], map: "Tache_createurId_fkey")
+  @@index([stagiaireId], map: "Tache_stagiaireId_fkey")
+}
+
+model Rapport {
+  id             String    @id @default(uuid())
+  date           DateTime  @default(now())
+  activites      String
+  difficultes    String?
+  apprentissages String?
+  valide         Boolean   @default(false)
+  commentaire    String?
+  validateurId   String?
+  stagiaireId    String
+  createdAt      DateTime  @default(now())
+  stagiaire      Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  validateur     User?     @relation("RapportValidator", fields: [validateurId], references: [id])
+
+  @@index([stagiaireId], map: "Rapport_stagiaireId_fkey")
+  @@index([validateurId], map: "Rapport_validateurId_fkey")
+}
+
+model PresenceSession {
+  id        String     @id @default(uuid())
+  token     String     @unique
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+  presences Presence[]
+}
+
+model Presence {
+  id          String           @id @default(uuid())
+  stagiaireId String
+  sessionId   String?
+  statut      PresenceStatut   @default(PRESENT)
+  ip          String?
+  latitude    Float?
+  longitude   Float?
+  scannedAt   DateTime         @default(now())
+  session     PresenceSession? @relation(fields: [sessionId], references: [id])
+  stagiaire   Stagiaire        @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "Presence_sessionId_fkey")
+  @@index([stagiaireId], map: "Presence_stagiaireId_fkey")
+}
+
+model Paiement {
+  id           String            @id @default(uuid())
+  stagiaireId  String
+  montant      Float
+  devise       String            @default("EUR")
+  statut       PaiementStatut    @default(PLANIFIE)
+  datePrevue   DateTime
+  datePaiement DateTime?
+  reference    String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  stagiaire    Stagiaire         @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+  tranches     TranchePaiement[]
+
+  @@index([stagiaireId], map: "Paiement_stagiaireId_fkey")
+}
+
+model TranchePaiement {
+  id              String        @id @default(uuid())
+  paiementId      String
+  montant         Float
+  methode         PaymentMethod @default(MOMO)
+  telephonePayeur String?
+  reference       String?
+  statut          TrancheStatut @default(EN_ATTENTE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  paiement        Paiement      @relation(fields: [paiementId], references: [id], onDelete: Cascade)
+
+  @@index([paiementId], map: "TranchePaiement_paiementId_fkey")
+}
+
+model Evaluation {
+  id               String    @id @default(uuid())
+  stagiaireId      String    @unique
+  evaluateurId     String
+  ponctualite      Float
+  rapports         Float
+  taches           Float
+  competences      Float
+  comportement     Float
+  noteFinale       Float
+  mention          String
+  commentaire      String?
+  attestationUrl   String?
+  attestationToken String?   @unique
+  createdAt        DateTime  @default(now())
+  evaluateur       User      @relation("Evaluator", fields: [evaluateurId], references: [id])
+  stagiaire        Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
+
+  @@index([evaluateurId], map: "Evaluation_evaluateurId_fkey")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  cible     String?
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId], map: "AuditLog_userId_fkey")
 }
 
 enum Role {
@@ -66,7 +232,7 @@ enum PresenceStatut {
 
 enum PaiementStatut {
   PLANIFIE
-  PARTIEL   // 🆕 Ajouté pour correspondre au Badge 'PAYÉ PARTIEL'
+  PARTIEL
   PAYE
   LITIGE
 }
@@ -82,180 +248,4 @@ enum TrancheStatut {
   EN_ATTENTE
   REUSSIT
   ECHOUE
-}
-
-model User {
-  id               String       @id @default(uuid())
-  email            String       @unique
-  password         String
-  nom              String
-  prenom           String
-  telephone        String?
-  photoUrl         String?
-  role             Role         @default(STAGIAIRE)
-  actif            Boolean      @default(true)
-  is_verify        Boolean      @default(false)
-  company          String?      
-  refreshToken     String?      @db.Text
-  verificationCode String?      
-  codeExpiresAt    DateTime?    
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-
-  stagiaire        Stagiaire?
-  tachesCreees     Tache[]      @relation("TacheCreator")
-  rapportsValides  Rapport[]    @relation("RapportValidator")
-  evaluations      Evaluation[] @relation("Evaluator")
-  auditLogs        AuditLog[]
-}
-
-model Stagiaire {
-  id            String       @id @default(uuid())
-  userId        String       @unique
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  numeroDossier String       @unique
-  domaine       String
-  dateDebut     DateTime
-  dateFin       DateTime
-  tuteurId      String?
-  cvUrl         String?
-  motivationUrl String?
-  photoUrl      String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-
-  taches        Tache[]
-  rapports      Rapport[]
-  presences     Presence[]
-  paiements     Paiement[]
-  evaluation    Evaluation?
-}
-
-model Inscription {
-  id            String            @id @default(uuid())
-  numeroDossier String            @unique
-  nom           String
-  prenom        String
-  email         String
-  telephone     String?
-  domaine       String
-  periode       String
-  cvUrl         String?
-  motivationUrl String?
-  status        InscriptionStatus @default(RECUE)
-  commentaire   String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-}
-
-model Tache {
-  id          String        @id @default(uuid())
-  titre       String
-  description String?
-  statut      TacheStatut   @default(A_FAIRE)
-  priorite    PriorityLevel @default(MOYENNE)
-  deadline    DateTime?
-  stagiaireId String
-  stagiaire   Stagiaire     @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
-  createurId  String
-  createur    User          @relation("TacheCreator", fields: [createurId], references: [id])
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-}
-
-model Rapport {
-  id             String    @id @default(uuid())
-  date           DateTime  @default(now())
-  activites      String
-  difficultes    String?
-  apprentissages String?
-  valide         Boolean   @default(false)
-  commentaire    String?
-  validateurId   String?
-  validateur     User?     @relation("RapportValidator", fields: [validateurId], references: [id])
-  stagiaireId    String
-  stagiaire      Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
-  createdAt      DateTime  @default(now())
-}
-
-model PresenceSession {
-  id        String     @id @default(uuid())
-  token     String     @unique
-  expiresAt DateTime
-  createdAt DateTime   @default(now())
-  presences Presence[]
-}
-
-model Presence {
-  id          String           @id @default(uuid())
-  stagiaireId String
-  stagiaire   Stagiaire        @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
-  sessionId   String?
-  session     PresenceSession? @relation(fields: [sessionId], references: [id])
-  statut      PresenceStatut   @default(PRESENT)
-  ip          String?
-  latitude    Float?
-  longitude   Float?
-  scannedAt   DateTime         @default(now())
-}
-
-model Paiement {
-  id           String         @id @default(uuid()) // UUID String gardé !
-  stagiaireId  String
-  stagiaire    Stagiaire      @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
-  montant      Float
-  devise       String         @default("EUR")
-  statut       PaiementStatut @default(PLANIFIE)
-  datePrevue   DateTime
-  datePaiement DateTime?
-  reference    String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-
-  tranches     TranchePaiement[] // Relation ajoutée
-}
-
-// 🆕 Nouveau modèle de suivi par tranches
-model TranchePaiement {
-  id              String        @id @default(uuid())
-  paiementId      String        // Changé en String pour matcher l'id parent
-  montant         Float
-  methode         PaymentMethod @default(MOMO)
-  telephonePayeur String?
-  reference       String?       
-  statut          TrancheStatut @default(EN_ATTENTE)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  paiement        Paiement      @relation(fields: [paiementId], references: [id], onDelete: Cascade)
-}
-
-model Evaluation {
-  id               String    @id @default(uuid())
-  stagiaireId      String    @unique
-  stagiaire        Stagiaire @relation(fields: [stagiaireId], references: [id], onDelete: Cascade)
-  evaluateurId     String
-  evaluateur       User      @relation("Evaluator", fields: [evaluateurId], references: [id])
-  ponctualite      Float
-  rapports         Float
-  taches           Float
-  competences      Float
-  comportement     Float
-  noteFinale       Float
-  mention          String
-  commentaire      String?
-  attestationUrl   String?
-  attestationToken String?   @unique
-  createdAt        DateTime  @default(now())
-}
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  action    String
-  cible     String?
-  details   String?
-  ip        String?
-  createdAt DateTime @default(now())
 }
