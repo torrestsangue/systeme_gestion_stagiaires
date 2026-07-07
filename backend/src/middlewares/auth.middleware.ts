@@ -5,10 +5,25 @@ import { Role } from '@prisma/client';
 const JWT_SECRET = process.env.JWT_SECRET!;
 
 /* ─────────────────────────────────────────
+   0. EXPORTATION DU TYPE AUTHREQUEST
+   Pour permettre à vos contrôleurs et autres
+   middlewares d'importer ce type proprement.
+───────────────────────────────────────── */
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+    role: Role;
+    actif: boolean;
+    company?: string | null;
+  };
+}
+
+/* ─────────────────────────────────────────
    1. VÉRIFIER LE TOKEN JWT
    Injecte req.user = { id, email, role, actif, company }
 ───────────────────────────────────────── */
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+export const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token manquant.' });
@@ -22,7 +37,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
       return res.status(403).json({ error: 'Compte désactivé.' });
     }
 
-    (req as any).user = decoded;
+    req.user = decoded;
     next();
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
@@ -37,8 +52,8 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
    Usage : authorize(Role.SUPER_ADMIN, Role.ADMIN_RH)
 ───────────────────────────────────────── */
 export const authorize = (...roles: Role[]) => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const user = (req as any).user;
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    const user = req.user;
     if (!user || !roles.includes(user.role)) {
       return res.status(403).json({
         error: 'Accès refusé. Permissions insuffisantes.',
