@@ -23,7 +23,7 @@ if (!fs.existsSync(uploadDir)) {
 ══════════════════════════════════════════════════════════════════════════ */
 app.use(
   cors({
-    origin: "*",
+    origin: ["https://ton-site-frontend.vercel.app", "http://localhost:5173"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -63,7 +63,7 @@ app.get("/health", (_req, res) => {
 /* ══════════════════════════════════════════════════════════════════════════
    DÉMARRAGE
 ══════════════════════════════════════════════════════════════════════════ */
-const PORT = env.PORT || 5000;
+const PORT = process.env.PORT || env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅  Serveur lancé    → http://localhost:${PORT}`);
   console.log(`📁  Uploads          → http://localhost:${PORT}/uploads`);
