@@ -14,7 +14,12 @@ export const AuthService = {
 
   logout: async (refreshToken: string) => {
     const { data } = await api.post<{ message: string }>("/logout", { refreshToken });
-    // client-side cleanup handled by caller
+    return data;
+  },
+
+  // ➕ AJOUTEZ CE BLOC :
+  forgotPassword: async (email: string): Promise<{ message: string }> => {
+    const { data } = await api.post<{ message: string }>("/forgot-password", { email });
     return data;
   },
 };

@@ -223,7 +223,15 @@ function StepCard({ step, index }) {
   );
 }
 
-function ModuleCard({ mod }) {
+// À insérer juste au-dessus de ModuleCard
+interface ModuleType {
+  icon: string;
+  title: string;
+  desc: string;
+  color: string;
+}
+
+function ModuleCard({ mod }: { mod: ModuleType }) {
   const [hov, setHov] = useState(false);
   return (
     <div
