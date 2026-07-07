@@ -1,14 +1,15 @@
 {
   "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "target": "ES2023",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "target": "ES2020",
     "strict": true,
     "esModuleInterop": true,
-    "ignoreDeprecations": "5.0",
+    "skipLibCheck": true,
     "types": ["node"],
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": ["src/**/*", "generated/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
