@@ -9,7 +9,7 @@ import {
   Check,
   X
 } from 'lucide-react';
-// import { ConfirmModal } from '../components/ui/ConfirmModal';import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { inscriptionService } from '../services/sgs.service';
@@ -279,13 +279,13 @@ export default function Inscriptions() {
         </div>
       </div>
 
-      {/* <ConfirmModal
+      <ConfirmModal
         open={modalOpen}
         mode={modalMode}
         candidateName={selectedCandidate ? `${selectedCandidate.prenom} ${selectedCandidate.nom}` : ''}
         onClose={() => setModalOpen(false)}
         onConfirm={handleConfirmFromModal}
-      /> */}
+      />
     </div>
   );
 }
