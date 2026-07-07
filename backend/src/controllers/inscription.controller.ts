@@ -182,7 +182,7 @@ export const InscriptionController = {
   // ─── 3. DÉTAIL D'UNE CANDIDATURE ──────────────────────────────────────────
   getById: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const inscription = await prisma.inscription.findUnique({ where: { id } });
       if (!inscription) return res.status(404).json({ error: 'Candidature introuvable.' });
       return res.json(inscription);
@@ -195,8 +195,8 @@ export const InscriptionController = {
   // ─── 4. CHANGER LE STATUT (admin / RH) — VERSION SÉCURISÉE ET CORRIGÉE 🛠️ ─
   updateStatus: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const { status, commentaire } = req.body;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const { status, commentaire, password } = req.body;
       const adminId = (req as any).user?.id;
 
       // 1. Trouver l'inscription d'origine
@@ -208,7 +208,45 @@ export const InscriptionController = {
         return res.status(404).json({ error: 'Candidature introuvable.' });
       }
 
-      // Si le statut ne passe pas à ACCEPTEE, mise à jour simple sans création de compte
+      // Refus : mise à jour et envoi de notification au candidat
+      if (status === InscriptionStatus.REFUSEE) {
+        const updated = await prisma.inscription.update({
+          where: { id },
+          data: { status, commentaire }
+        });
+
+        try {
+          await transporter.sendMail({
+            from: `"SGS RH" <${process.env.EMAIL_USER || 'no-reply@sgs.local'}>`,
+            to: inscription.email,
+            subject: 'Votre candidature SGS a été refusée',
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:auto;">
+                <h2>Bonjour ${inscription.prenom} ${inscription.nom},</h2>
+                <p>Nous vous remercions pour votre candidature au sein de SGS.</p>
+                <p>Après examen, votre dossier n'a pas été retenu pour le moment.</p>
+                ${commentaire ? `<p><strong>Message RH :</strong> ${commentaire}</p>` : ''}
+                <p>Nous vous souhaitons une bonne continuation et restons à votre disposition pour de futures opportunités.</p>
+              </div>
+            `,
+          });
+        } catch (mailError) {
+          console.error('Erreur envoi email refus candidature :', mailError);
+        }
+
+        await prisma.auditLog.create({
+          data: {
+            userId: adminId,
+            action: 'INSCRIPTION_STATUS',
+            cible: 'Inscription',
+            details: `${inscription.numeroDossier} refusé`,
+            ip: req.ip
+          }
+        });
+
+        return res.json({ message: `Statut mis à jour -> ${status}`, inscription: updated });
+      }
+
       if (status !== InscriptionStatus.ACCEPTEE) {
         const updated = await prisma.inscription.update({
           where: { id },
@@ -220,7 +258,7 @@ export const InscriptionController = {
       /* ─────────────────────────────────────────────────────────────────
          LOGIQUE D'ACCEPTATION : SÉCURISATION TRANSACTIONNELLE BDD
          ───────────────────────────────────────────────────────────────── */
-      const passwordTemp = 'Stagiaire123!'; // Correction cohérente du nom de variable
+      const passwordTemp = typeof password === 'string' && password.trim() ? password.trim() : 'Stagiaire123!';
       const passwordHash = await bcrypt.hash(passwordTemp, 10);
 
       // Adaptation automatique du numéro de dossier pour correspondre aux filtres (DOS-XXXX -> STG-XXXX)
@@ -251,13 +289,17 @@ export const InscriptionController = {
           });
         } else {
           // Si l'utilisateur possède déjà un compte, on s'assure qu'il reçoit l'accès Stagiaire et qu'il soit vérifié
+          const updateData: any = {
+            role: Role.STAGIAIRE,
+            actif: true,
+            is_verify: true,
+          };
+          if (passwordTemp) {
+            updateData.password = passwordHash;
+          }
           user = await tx.user.update({
             where: { id: user.id },
-            data: { 
-              role: Role.STAGIAIRE, 
-              actif: true,
-              is_verify: true // ✅ AJOUTE CETTE LIGNE ICI
-            }
+            data: updateData
           });
         }
 
@@ -395,7 +437,7 @@ export const InscriptionController = {
   // ─── 6. SUPPRIMER (admin seulement) ──────────────────────────────────────
   delete: async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       await prisma.inscription.findUniqueOrThrow({ where: { id } });
       await prisma.inscription.delete({ where: { id } });
       return res.json({ message: 'Candidature supprimée.' });

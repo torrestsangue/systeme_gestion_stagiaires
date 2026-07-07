@@ -127,14 +127,79 @@ export const PresenceController = {
         ? PresenceStatut.RETARD
         : PresenceStatut.PRESENT;
 
+      // --- Vérifications On-site / Réseau ---
+      const companyLat = process.env.COMPANY_LAT ? Number(process.env.COMPANY_LAT) : null;
+      const companyLon = process.env.COMPANY_LON ? Number(process.env.COMPANY_LON) : null;
+      const allowedRadius = process.env.PRESENCE_ALLOWED_RADIUS ? Number(process.env.PRESENCE_ALLOWED_RADIUS) : 200; // meters
+      const allowedCidrs = process.env.COMPANY_ALLOWED_CIDRS ? process.env.COMPANY_ALLOWED_CIDRS.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      const latitude = typeof req.body.latitude === 'number' ? req.body.latitude : (req.body.latitude ? Number(req.body.latitude) : null);
+      const longitude = typeof req.body.longitude === 'number' ? req.body.longitude : (req.body.longitude ? Number(req.body.longitude) : null);
+
+      const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const toRad = (v: number) => v * Math.PI / 180;
+        const R = 6371000; // metres
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+      };
+
+      const ipToInt = (ip: string) => {
+        if (!ip) return null;
+        // remove port if any
+        ip = ip.split(':').slice(-1).pop() || ip;
+        const parts = ip.split('.');
+        if (parts.length !== 4) return null;
+        return parts.reduce((acc, p) => (acc<<8) + Number(p), 0) >>> 0;
+      };
+
+      const cidrMatch = (ip: string, cidr: string) => {
+        try {
+          if (!ip || !cidr) return false;
+          const [range, bitsStr] = cidr.split('/');
+          const bits = Number(bitsStr || '32');
+          const ipInt = ipToInt(ip);
+          const rangeInt = ipToInt(range);
+          if (ipInt === null || rangeInt === null) return false;
+          const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+          return (ipInt & mask) === (rangeInt & mask);
+        } catch {
+          return false;
+        }
+      };
+
+      let locationOk = false;
+      let networkOk = false;
+
+      if (companyLat !== null && companyLon !== null && latitude !== null && longitude !== null) {
+        const dist = haversine(companyLat, companyLon, latitude, longitude);
+        locationOk = dist <= allowedRadius;
+      }
+
+      // req.ip may be like ::ffff:127.0.0.1, normalize
+      const clientIp = req.ip || (req.headers['x-forwarded-for'] as string | undefined) || '';
+      for (const cidr of allowedCidrs) {
+        if (cidrMatch(clientIp, cidr)) {
+          networkOk = true;
+          break;
+        }
+      }
+
+      const requireOnSite = process.env.PRESENCE_REQUIRE_ON_SITE === 'true';
+      if (requireOnSite && !(locationOk || networkOk)) {
+        return res.status(403).json({ error: 'Présence refusée : vous devez être sur le site (géoloc) ou connecté au réseau de l’entreprise.', locationOk, networkOk });
+      }
+
       const presence = await prisma.presence.create({
         data: {
           stagiaireId: stagiaire.id,
           sessionId:   session.id,
           statut,
           ip:        req.ip ?? null,
-          latitude:  req.body.latitude  ?? null,
-          longitude: req.body.longitude ?? null,
+          latitude:  latitude ?? null,
+          longitude: longitude ?? null,
           scannedAt: new Date(),
         },
       });
@@ -145,6 +210,8 @@ export const PresenceController = {
           : 'Présence enregistrée (retard signalé).',
         statut,
         presence,
+        locationOk,
+        networkOk,
       });
     } catch (error) {
       console.error('PresenceController.pointer:', error);
