@@ -145,22 +145,33 @@ function useQrTimer(initial = 90) {
   return sec;
 }
 
-function useCountUp(target, duration = 1500) {
-  const [val, setVal] = useState(0);
-  const ref = useRef(null);
+function useCountUp(target: string | number, duration = 1500) {
+  const [val, setVal] = useState<string | number>(0);
+  const ref = useRef<number | null>(null); // Correction ligne 158 : Précise que le ref contient un number (l'ID de l'animation) ou null
+
   useEffect(() => {
-    const num = parseInt(target.replace(/\D/g, ''), 10);
-    if (isNaN(num)) { setVal(target); return; }
+    const targetStr = String(target);
+    const num = parseInt(targetStr.replace(/\D/g, ''), 10);
+    if (isNaN(num)) { setVal(targetStr); return; }
+    
     const start = performance.now();
-    const tick = (now) => {
+    
+    const tick = (now: number) => { // Correction lignes 148 & 155 : Ajout du type 'number' à 'now'
       const p = Math.min((now - start) / duration, 1);
       setVal(Math.round((1 - Math.pow(1 - p, 3)) * num));
-      if (p < 1) ref.current = requestAnimationFrame(tick);
+      if (p < 1) {
+        ref.current = requestAnimationFrame(tick);
+      }
     };
+    
     ref.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(ref.current);
-  }, []);
-  return typeof val === 'number' ? target.replace(/\d+/, val) : val;
+    return () => {
+      if (ref.current !== null) cancelAnimationFrame(ref.current);
+    };
+  }, [target, duration]);
+
+  const targetStr = String(target);
+  return typeof val === 'number' ? targetStr.replace(/\d+/, String(val)) : val;
 }
 
 /* ─────────────────────────────────────────

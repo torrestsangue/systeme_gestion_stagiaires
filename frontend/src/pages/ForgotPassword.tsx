@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import { GraduationCap, Mail, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
-import { authService } from '../services/auth.service'; // Ajustez le chemin
+import { AuthService } from '../services/auth.service'; // Ajustez le chemin
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -18,7 +18,7 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      await authService.forgotPassword(email);
+      await AuthService.forgotPassword(email);
       setIsSent(true);
       toast.success('Lien de réinitialisation envoyé !');
     } catch (error: any) {
